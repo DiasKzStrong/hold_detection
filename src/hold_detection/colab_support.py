@@ -79,8 +79,11 @@ def prepare_inputs(paths: list[Path], workspace: Path) -> PreparedInput:
     if any(not p.is_file() or p.suffix.lower() not in IMAGE_EXTENSIONS for p in paths):
         raise ValueError("Supported uploads: JPEG, PNG, WebP, BMP, TIFF, or one ZIP")
     workspace.mkdir(parents=True, exist_ok=False)
+    unique_names = len({p.name for p in paths}) == len(paths)
     for index, path in enumerate(paths):
-        shutil.copy2(path, workspace / f"{index:04d}_{path.name}")
+        # Preserve image filenames so COCO annotations can match uploaded photos.
+        name = path.name if unique_names else f"{index:04d}_{path.name}"
+        shutil.copy2(path, workspace / name)
     return PreparedInput(workspace, "photos", len(paths))
 
 

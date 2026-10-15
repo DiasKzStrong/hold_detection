@@ -33,6 +33,14 @@ def parser():
     commands.add_parser("sam3-doctor", help="Report SAM 3 software, GPU and auth prerequisites")
     gallery = commands.add_parser("gallery", help="Build an offline HTML gallery for a completed run")
     gallery.add_argument("run", type=Path)
+    benchmark = commands.add_parser("benchmark", help="Compare shared-image runs; optional COCO quality metrics")
+    benchmark.add_argument("--run", nargs=2, action="append", metavar=("MODEL", "PATH"), required=True)
+    benchmark.add_argument("--threshold", nargs=2, action="append", metavar=("MODEL", "SCORE"), required=True)
+    benchmark.add_argument("--annotations", type=Path)
+    benchmark.add_argument("--gt-coordinates", choices=("source", "processed"), default="source")
+    benchmark.add_argument("--match-iou", type=probability, default=0.5)
+    benchmark.add_argument("--max-det", type=positive, default=500)
+    benchmark.add_argument("--output", type=Path, required=True)
     inspect = commands.add_parser("inspect-polycam", help="Inspect a raw-data ZIP without extracting")
     inspect.add_argument("archive", type=Path)
     prepare = commands.add_parser("prepare-polycam", help="Unpack RGB-D frames and camera metadata")
@@ -100,6 +108,17 @@ def main(argv=None):
         elif args.command == "gallery":
             from .gallery import build_gallery
             print(build_gallery(args.run))
+        elif args.command == "benchmark":
+            from .benchmark import compare_runs
+            from .visualization import write_report
+            paths = {name: Path(path) for name, path in args.run}
+            thresholds = {name: float(value) for name, value in args.threshold}
+            if len(paths) != len(args.run) or len(thresholds) != len(args.threshold):
+                raise ValueError("Duplicate model names in benchmark arguments")
+            report = compare_runs(paths, thresholds, args.annotations, args.gt_coordinates,
+                                  args.match_iou, args.max_det)
+            write_report(paths, report, args.output)
+            print(f"Comparison: {args.output / 'index.html'}; quality status: {report['quality_status']}")
         elif args.command in {"inspect-polycam", "prepare-polycam"}:
             from .polycam import inspect_archive, prepare_archive
             info = (inspect_archive(args.archive) if args.command == "inspect-polycam"

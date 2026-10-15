@@ -91,12 +91,27 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
             image = original.convert("RGB")
         if rotate:
             image = image.rotate(-rotate, expand=True)
+        def synchronize():
+            if str(getattr(detector, "device", "cpu")).startswith("cuda"):
+                import torch
+                torch.cuda.synchronize(detector.device)
+
+        synchronize()
+        stage_started = time.monotonic()
         detections = detector.detect(
             image, confidence=confidence, iou=iou, imgsz=imgsz,
             tile_size=tile_size, overlap=overlap, max_det=max_det,
         )
+        synchronize()
+        detection_seconds = time.monotonic() - stage_started
+        stage_started = time.monotonic()
         predictions = classifier.classify(image, detections) if classifier else [None] * len(detections)
+        synchronize()
+        classification_seconds = time.monotonic() - stage_started
+        stage_started = time.monotonic()
         masks = segmenter.segment(image, detections) if segmenter else [None] * len(detections)
+        synchronize()
+        segmentation_seconds = time.monotonic() - stage_started
         if len(predictions) != len(detections) or len(masks) != len(detections):
             raise ValueError("Model returned a different number of results than detections")
         identity = path.name if source.is_file() else path.relative_to(source).as_posix()
@@ -150,6 +165,10 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
             "coordinate_space": "processed_image_pixels",
             "camera_registration_verified": False,
             "hold_ids_are": "frame_local_not_multiview_tracks",
+            "timings": {"detection_seconds": detection_seconds,
+                        "classification_seconds": classification_seconds,
+                        "segmentation_seconds": segmentation_seconds,
+                        "model_seconds": detection_seconds + classification_seconds + segmentation_seconds},
             "holds": records, "elapsed_seconds": round(time.monotonic() - image_started, 3),
         }
         (frame_dir / "holds.json").write_text(json.dumps(frame, indent=2, allow_nan=False) + "\n")
@@ -165,6 +184,7 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
                      "tile_overlap": overlap, "max_det": max_det, "rotate": rotate},
         "frame_count": len(frames), "detection_count": sum(f["hold_count"] for f in frames),
         "segmentation_enabled": segmenter is not None,
+        "timing_protocol": "CUDA synchronized; model loading excluded; first-image warmup included; frame elapsed includes image/crop export",
         "elapsed_seconds": round(time.monotonic() - started, 3), "frames": frames,
         "evaluation": "Unlabeled inference; detection/type accuracy has not been measured.",
     }

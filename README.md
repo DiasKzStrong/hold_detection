@@ -18,15 +18,22 @@ See [checkpoint provenance and limitations](docs/model-provenance.md).
 
 [Open the notebook in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_SAM3_Colab.ipynb).
 
-Upload [DeMoSearch_SAM3_Colab.ipynb](notebooks/DeMoSearch_SAM3_Colab.ipynb) to
-<https://colab.research.google.com/> and enable a GPU runtime. It embeds this
-pipeline's source, installs official SAM 3 at a pinned revision, reads `HF_TOKEN`
-from Colab Secrets or a hidden prompt, accepts photos/Polycam ZIP/Drive, previews
-rotation, runs segmentation plus optional classification, and downloads an
-offline results gallery. Start with its default of one image. Approved access
-to `facebook/sam3` is required. Actual GPU inference has not been validated here.
+The notebook compares **YOLO11s detection + types** with **SAM 3 masks + crop CNN**
+on the same photos. It has a frame selector, side-by-side images, threshold sliders,
+boxes/masks toggles, crop grids, latency plots and an offline report download.
+Start with its default of three photos. YOLO runs first, even without GPU/HF access.
 
-Regenerate the notebook after package edits with
+Use a Python 3.12 GPU runtime for SAM. Its official source revision is pinned;
+approved access to `facebook/sam3` and `HF_TOKEN` in Colab Secrets (or a hidden
+prompt) are required. The notebook checks out this public repository and records
+the exact commit. Photos, Polycam raw-data ZIPs and Drive inputs are supported.
+
+Upload COCO ground truth to obtain precision/recall/F1, box AP, SAM mask AP/IoU
+and type confusion matrices. Without labels it reports diagnostics, **not accuracy**.
+See [notebook controls and evaluation protocol](docs/colab.md).
+Actual SAM GPU inference has not been validated on this CPU-only development machine.
+
+Regenerate the notebook after notebook edits with
 `python scripts/build_colab_notebook.py`; it never embeds photos, weights or tokens.
 
 ## Install
@@ -141,6 +148,21 @@ checkpoint as a local file. Box-only inference works without this dependency.
 ```bash
 uv run pytest
 ```
+
+Compare completed runs in a portable HTML/CSV/JSON report:
+
+```bash
+uv run --extra dev holds benchmark \
+  --run YOLO runs/yolo-test --threshold YOLO 0.35 \
+  --run SAM3 runs/sam3-test --threshold SAM3 0.5 \
+  --annotations path/to/coco.json --gt-coordinates source \
+  --output runs/comparison-test
+```
+
+Both runs must cover the same input files and rotation. Omit `--annotations` for
+unlabeled diagnostics. Save low-confidence proposals during inference (e.g.
+`--conf 0.05`) for AP; sliders cannot restore proposals discarded earlier.
+Box AP is class-agnostic; the explicit maxDets=500 differs from standard COCO's 100.
 
 To evaluate the crop CNN on your own labels (one integer class ID per TXT file,
 in the upstream class order):

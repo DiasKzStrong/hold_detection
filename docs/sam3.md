@@ -5,11 +5,12 @@ YOLO does not supply the boxes. The default prompt is `climbing hold`; the crop
 CNN optionally assigns grip types afterward. SAM's concept score is not a grip
 type score, and neither score is calibrated accuracy.
 
-For Google Colab, use the standalone
+For Google Colab, use the comparison
 [DeMoSearch_SAM3_Colab.ipynb](../notebooks/DeMoSearch_SAM3_Colab.ipynb).
-It contains an embedded copy of the pipeline source, so it does not depend on
-these changes being pushed to GitHub. Its GPU setup and download cells need to
-be run in Colab; local structural/helper validation is not a GPU readiness claim.
+It checks out the public project repository and compares YOLO with SAM on the
+same frames, with interactive figures and optional COCO ground-truth metrics.
+See [notebook controls and evaluation protocol](colab.md). Its GPU setup and
+inference need to run in Colab; local tests are not a GPU readiness claim.
 
 ## What was actually verified here
 
@@ -127,6 +128,6 @@ That particular gallery contains real **YOLO** outputs, not SAM masks. The file
 `holds.json` in each frame contains boxes, processed-image coordinates, mask
 paths and scores. The summary records the model hash, prompt and source revision.
 
-The standalone Colab notebook embeds the pipeline source, so it does not require
-a separate project checkout. For a GPU machine, use the repository checkout or
+The Colab notebook fetches its own project checkout from public GitHub.
+For a GPU machine, use the repository checkout or
 the prepared source archive and follow the installation commands above.

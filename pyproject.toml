@@ -17,7 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-dev = ["pytest==8.4.2", "nbformat==5.10.4"]
+dev = ["pytest==8.4.2", "nbformat==5.10.4", "pycocotools==2.0.11", "ipywidgets==8.1.8", "pandas>=2.2,<4"]
 
 [project.scripts]
 holds = "hold_detection.cli:main"

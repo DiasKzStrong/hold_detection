@@ -1,11 +1,11 @@
 import ast
-import base64
-import hashlib
+from datetime import datetime, timezone
 from io import BytesIO
 import importlib.util
 import json
 from pathlib import Path
-import sys
+from types import SimpleNamespace
+import uuid
 from zipfile import ZipFile
 
 import nbformat
@@ -24,7 +24,7 @@ def load_notebook():
     return nbformat.read(NOTEBOOK, as_version=4)
 
 
-def test_notebook_is_valid_unexecuted_python_with_current_embedded_sources():
+def test_notebook_is_valid_readable_and_unexecuted():
     notebook = load_notebook()
     nbformat.validate(notebook)
     ids = [c.id for c in notebook.cells]
@@ -37,39 +37,27 @@ def test_notebook_is_valid_unexecuted_python_with_current_embedded_sources():
     builder = importlib.util.module_from_spec(spec)
     spec.loader.exec_module(builder)
     assert json.loads(NOTEBOOK.read_text()) == builder.build_notebook()
-    install = next(c.source for c in notebook.cells if c.id == "install")
-    assert "system_site_packages=True" in install
-    assert "torch==" not in install  # Do not replace Colab's paired CUDA wheels.
+    sources = "\n".join(c.source for c in notebook.cells if c.cell_type == "code")
+    assert "PAYLOAD_B64" not in sources
+    assert ids.index("baseline") < ids.index("sam-setup")
+    assert {"viewer", "crop-grid", "metrics", "gt-upload", "export"} <= set(ids)
+    assert notebook.metadata.demosearch.experiment_version == 2
 
 
-def test_embedded_bootstrap_extracts_exact_source_without_cloning_project(tmp_path):
+def test_experiment_settings_execute_without_gpu_or_authentication(tmp_path):
     notebook = load_notebook()
-    source = next(c.source for c in notebook.cells if c.id == "bootstrap")
-
-    class LocalWorkPath(ast.NodeTransformer):
-        def visit_Constant(self, node):
-            if node.value == "/content/demosearch":
-                return ast.copy_location(ast.Constant(str(tmp_path / "work")), node)
-            return node
-
-    tree = ast.fix_missing_locations(LocalWorkPath().visit(ast.parse(source)))
-    namespace = {"sys": sys}
-    original_path = list(sys.path)
-    try:
-        exec(compile(tree, "bootstrap", "exec"), namespace)
-        for relative, digest in notebook.metadata.demosearch.embedded_files.items():
-            content = (namespace["PROJECT"] / relative).read_bytes()
-            assert hashlib.sha256(content).hexdigest() == digest
-            assert content == (ROOT / relative).read_bytes()
-        # A rerun is harmless, but a local source edit must not be overwritten.
-        exec(compile(tree, "bootstrap", "exec"), namespace)
-        edited = namespace["PROJECT"] / "src/hold_detection/__init__.py"
-        edited.write_text("# user edit\n")
-        with pytest.raises(FileExistsError):
-            exec(compile(tree, "bootstrap", "exec"), namespace)
-        assert edited.read_text() == "# user edit\n"
-    finally:
-        sys.path[:] = original_path
+    source = next(c.source for c in notebook.cells if c.id == "settings")
+    namespace = {"prepared": SimpleNamespace(kind="polycam"), "PROJECT": tmp_path,
+                 "datetime": datetime, "timezone": timezone, "uuid": uuid}
+    exec(compile(source, "settings", "exec"), namespace)
+    assert namespace["rotation"] == 90
+    assert namespace["RUNS"] == {}
+    assert namespace["EXPERIMENT"].is_dir()
+    assert namespace["CANDIDATE_FLOOR"] < namespace["YOLO_THRESHOLD"]
+    from hold_detection.notebook_runtime import prepare_runtime
+    import inspect
+    setup = inspect.getsource(prepare_runtime)
+    assert "system_site_packages=True" in setup and "torch==" not in setup
 
 
 def jpeg_bytes():
@@ -155,3 +143,55 @@ def test_result_zip_contains_offline_gallery_and_all_referenced_assets(tmp_path)
         bundle_results(run, archive)
     with pytest.raises(ValueError, match="outside"):
         bundle_results(run, run / "bundle.zip")
+
+
+@pytest.mark.parametrize("with_gt", [False, True])
+def test_actual_notebook_metrics_errors_and_export_cells(tmp_path, with_gt):
+    import matplotlib.pyplot as plt
+    from IPython.display import HTML
+    from hold_detection.cli import main
+    from hold_detection.visualization import ComparisonViewer, plot_comparison
+
+    image = tmp_path / "wall.jpg"
+    image.write_bytes(jpeg_bytes())
+
+    class Detector:
+        def detect(self, image, **kwargs):
+            return [Detection((2, 2, 10, 10), 0.8, "jug")]
+
+    experiment = tmp_path / "experiment"
+    run = experiment / "yolo"
+    run_inference(image, run, Detector(), model_metadata={"classifier": "detector"})
+    runs = {"YOLO fixture": run}
+    gt = None
+    if with_gt:
+        gt = tmp_path / "annotations.json"
+        gt.write_text(json.dumps({
+            "images": [{"id": 1, "file_name": "wall.jpg", "width": 20, "height": 15}],
+            "categories": [{"id": 1, "name": "jug"}],
+            "annotations": [{"id": 1, "image_id": 1, "category_id": 1, "bbox": [2, 2, 8, 8]}],
+        }))
+
+    def run_holds(*arguments, log_name):
+        assert main([str(a) for a in arguments]) == 0
+
+    shown, downloads = [], []
+    ns = {"json": json, "uuid": uuid, "plt": plt, "HTML": HTML, "display": shown.append,
+          "RUNS": runs, "EXPERIMENT": experiment, "GT_COORDINATES": "source", "GT_FILE": gt,
+          "viewer": ComparisonViewer(runs, {"YOLO fixture": 0.5}), "run_holds": run_holds,
+          "plot_comparison": plot_comparison, "CODE_SHA": "test_fixture", "RUN_SAM3": False,
+          "SAM_READY": False, "runtime_info": lambda *_: {"gpu": None}, "PYTHON": None,
+          "PROJECT": ROOT, "WORK": tmp_path, "files": SimpleNamespace(download=downloads.append)}
+    notebook = load_notebook()
+    for cell_id in ["metrics", "errors", "export"]:
+        source = next(c.source for c in notebook.cells if c.id == cell_id)
+        exec(compile(source, cell_id, "exec"), ns)
+    assert ns["report"]["quality_status"] == ("evaluated" if with_gt else "ground_truth_required")
+    assert ns["table"]["Candidates"].iloc[0] == 1
+    assert "YOLO fixture" in shown[0].to_html()
+    assert len(downloads) == 1
+    with ZipFile(downloads[0]) as archive:
+        assert archive.testzip() is None
+        assert "experiment/session.json" in archive.namelist()
+        assert any(n.endswith("/metrics.csv") for n in archive.namelist())
+        assert any(n.endswith("/errors_000.jpg") for n in archive.namelist()) == with_gt
