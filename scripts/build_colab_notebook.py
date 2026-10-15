@@ -227,7 +227,9 @@ def build_notebook():
                     print('SAM 3 finished on the same frames as YOLO.')
                 except RuntimeError as error:
                     print('SAM 3 inference failed:', error)
-                    print('YOLO remains available. For GPU OOM, try a larger GPU and rerun this cell.')
+                    print('YOLO remains available. Fix the error shown above and rerun this cell.')
+                    if 'cuda' in str(error).lower() and 'out of memory' in str(error).lower():
+                        print('For CUDA out-of-memory errors, try a larger GPU.')
         """),
         cell("markdown", "viewer-heading", """
             ## 5 · Frame-by-frame comparison

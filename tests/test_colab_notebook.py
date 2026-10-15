@@ -72,6 +72,25 @@ def test_bootstrap_and_sam_setup_never_import_kernel_torch():
     assert "Select a Python 3.12 runtime" not in bootstrap
 
 
+@pytest.mark.parametrize("error_message,is_oom", [
+    ("TypeError: Got unsupported ScalarType BFloat16", False),
+    ("CUDA out of memory. Tried to allocate a tensor", True),
+])
+def test_sam_failure_suggests_larger_gpu_only_for_cuda_oom(tmp_path, capsys, error_message, is_oom):
+    def fail(*args, **kwargs):
+        raise RuntimeError(error_message)
+    source = next(c.source for c in load_notebook().cells if c.id == "sam3-run")
+    namespace = {"RUNS": {}, "THRESHOLDS": {}, "SAM_READY": True, "EXPERIMENT": tmp_path,
+                 "uuid": uuid, "SOURCE": tmp_path, "rotation": 0, "PROMPT": "climbing hold",
+                 "CANDIDATE_FLOOR": 0.05, "MIN_TYPE_SCORE": 0.5, "MAX_IMAGES": 1,
+                 "run_holds": fail}
+    exec(compile(source, "sam3-run", "exec"), namespace)
+    output = capsys.readouterr().out
+    assert error_message in output
+    assert ("try a larger GPU" in output) == is_oom
+    assert namespace["RUNS"] == {}
+
+
 def jpeg_bytes():
     stream = BytesIO()
     Image.new("RGB", (20, 15), (30, 60, 90)).save(stream, format="JPEG")

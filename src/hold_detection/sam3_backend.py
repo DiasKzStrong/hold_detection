@@ -85,9 +85,11 @@ def fetch_checkpoint(destination: Path, revision="main") -> Path:
 
 def decode_predictions(result, width: int, height: int, iou: float, max_det: int):
     """Convert official N×1×H×W masks, keeping identity through filtering/NMS."""
-    boxes = result["boxes"].detach().cpu().numpy()
-    scores = result["scores"].detach().cpu().numpy().reshape(-1)
-    masks = result["masks"].detach().cpu().numpy()
+    # Autocast may return BF16, which NumPy cannot represent directly.
+    boxes = result["boxes"].detach().float().cpu().numpy()
+    scores = result["scores"].detach().float().cpu().numpy().reshape(-1)
+    # Official processor masks are already thresholded; keep them compact/binary.
+    masks = result["masks"].detach().bool().cpu().numpy()
     if masks.ndim == 4 and masks.shape[1] == 1:
         masks = masks[:, 0]
     if masks.ndim != 3 or masks.shape[1:] != (height, width):

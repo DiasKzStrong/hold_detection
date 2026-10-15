@@ -40,7 +40,26 @@ def test_sam3_nms_preserves_correct_masks_and_does_not_invent_types():
     assert classified["grip_type"] == "jug" and not classified["needs_review"]
 
 
-def test_sam3_adapter_consumes_official_processor_outputs_and_rejects_stale_masks(tmp_path):
+@pytest.mark.parametrize("dtype", [torch.bfloat16, torch.float16, torch.float32])
+@pytest.mark.parametrize("floating_masks", [False, True])
+def test_sam3_mixed_precision_outputs_convert_to_numpy_without_losing_alignment(dtype, floating_masks):
+    result = predictions()
+    result["boxes"] = result["boxes"].to(dtype).requires_grad_()
+    result["scores"] = result["scores"].to(dtype).requires_grad_()
+    if floating_masks:
+        result["masks"] = result["masks"].to(dtype).requires_grad_()
+    detections, masks = decode_predictions(result, 30, 20, 0.5, 500)
+    assert [d.bbox for d in detections] == [(1, 1, 5, 5), (10, 8, 20, 18)]
+    assert detections[0].score == float(result["scores"][1].detach().float())
+    assert detections[1].score == float(result["scores"][0].detach().float())
+    assert [mask.dtype for mask, _ in masks] == [np.dtype(bool), np.dtype(bool)]
+    assert [int(mask.sum()) for mask, _ in masks] == [16, 100]
+    assert [score for _, score in masks] == [d.score for d in detections]
+    assert result["boxes"].dtype == dtype  # Conversion must not mutate model outputs.
+
+
+@pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
+def test_sam3_adapter_consumes_official_processor_outputs_and_rejects_stale_masks(tmp_path, dtype):
     class Processor:
         def set_image(self, image):
             assert image.size == (30, 20)
@@ -48,7 +67,7 @@ def test_sam3_adapter_consumes_official_processor_outputs_and_rejects_stale_mask
 
         def set_text_prompt(self, prompt, state):
             assert state["image_set"] and prompt == "climbing hold"
-            return predictions()
+            return {name: tensor.to(dtype) for name, tensor in predictions().items()}
 
     detector = Sam3Detector.__new__(Sam3Detector)
     detector.device, detector.prompt = "cpu", "climbing hold"
