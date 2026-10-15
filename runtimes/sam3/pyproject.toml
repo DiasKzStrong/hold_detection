@@ -1,0 +1,29 @@
+[project]
+name = "demosearch-sam3-runtime"
+version = "0.1.0"
+requires-python = ">=3.12,<3.13"
+dependencies = [
+  "demo-hold-detection",
+  "sam3",
+  "torch==2.7.1",
+  "torchvision==0.22.1",
+  "numpy==1.26.4",
+  "opencv-python==4.11.0.86",
+  "setuptools>=77,<81",
+  "einops==0.8.1",
+  "decord==0.6.0; sys_platform == 'linux' and platform_machine == 'x86_64'",
+  "pycocotools==2.0.11",
+  "psutil>=5.9",
+  "triton==3.3.1; sys_platform == 'linux' and platform_machine == 'x86_64'",
+]
+
+[tool.uv.sources]
+demo-hold-detection = { path = "../..", editable = true }
+sam3 = { git = "https://github.com/facebookresearch/sam3.git", rev = "7f473cfd983d5eb43040ff608f66bff0d7bdcb53" }
+torch = { index = "pytorch-cpu" }
+torchvision = { index = "pytorch-cpu" }
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true

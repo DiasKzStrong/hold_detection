@@ -1,0 +1,174 @@
+"""Batch inference and inspectable, versioned per-frame artifacts."""
+
+from collections import Counter
+import hashlib
+import json
+from pathlib import Path
+import time
+
+import numpy as np
+from PIL import Image, ImageDraw
+
+from .geometry import TYPES, crop_box
+
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+COLORS = dict(zip(TYPES, ["#f5b041", "#58d68d", "#5dade2", "#ec7063", "#af7ac5", "#f4d03f"]))
+
+
+def collect_images(source: Path) -> list[Path]:
+    if source.is_file() and source.suffix.lower() in IMAGE_EXTENSIONS:
+        return [source]
+    if source.is_dir():
+        images = sorted(p for p in source.rglob("*")
+                        if p.is_file() and p.suffix.lower() in IMAGE_EXTENSIONS)
+        if images:
+            return images
+    raise ValueError(f"No supported images at {source}; point to corrected_images, not a raw export root")
+
+
+def validate_image_source(source: Path):
+    if source.is_dir() and ((source / "keyframes").is_dir() or (source / "mesh_info.json").is_file()):
+        raise ValueError("Use <export>/keyframes/corrected_images, not the export root")
+
+
+def make_hold_record(detection, index, scores, minimum_score, mask_info=None,
+                     mask_method="sam2_box_prompt"):
+    if scores is None and not detection.label_is_type:
+        label, score, method, alternatives = "unknown", None, "not_inferred", None
+    elif scores is None:
+        label, score = detection.label, detection.score
+        method = "detector_joint_class_score"
+        alternatives = None  # YOLO postprocessing does not expose the full type distribution.
+    else:
+        label = max(scores, key=scores.get)
+        score = scores[label]
+        method = "crop_cnn_softmax"
+        alternatives = scores
+    unknown = score is None or score < minimum_score
+    disagreement = scores is not None and detection.label_is_type and label != detection.label
+    mask, mask_score = mask_info if mask_info is not None else (None, None)
+    empty_mask = mask is not None and not mask.any()
+    return {
+        "hold_id": f"h{index:04d}", "bbox_xyxy": list(detection.bbox),
+        "bbox_center_xy": [(detection.bbox[0] + detection.bbox[2]) / 2,
+                           (detection.bbox[1] + detection.bbox[3]) / 2],
+        "detector_label": detection.label, "detector_score": detection.score,
+        "predicted_type": label,
+        "object_kind": (detection.label if not detection.label_is_type
+                        and scores is None and detection.label in {"hold", "volume"}
+                        else "unknown" if unknown else "volume" if label == "volume" else "hold"),
+        "grip_type": "unknown" if unknown else (None if label == "volume" else label),
+        "type_score": score, "type_score_method": method, "type_scores": alternatives,
+        "scores_calibrated": False,
+        "needs_review": unknown or empty_mask or disagreement,
+        "review_reasons": (["type_not_inferred"] if score is None else ["low_type_score"] if unknown else [])
+        + (["empty_mask"] if empty_mask else [])
+        + (["classifier_detector_disagreement"] if disagreement else []),
+        "mask_path": None, "segmentation_score": mask_score,
+        "segmentation_method": mask_method if mask is not None else None,
+        "route_id": None, "position_3d": None,
+    }
+
+
+def run_inference(source: Path, output: Path, detector, classifier=None, segmenter=None,
+                  confidence=0.35, minimum_type_score=0.5, iou=0.5, imgsz=1024,
+                  tile_size=0, overlap=0.25, max_det=500, rotate=0, limit=None,
+                  model_metadata=None) -> dict:
+    validate_image_source(source)
+    if source.is_dir() and output.resolve().is_relative_to(source.resolve()):
+        raise ValueError("Output must be outside the input image directory")
+    images = collect_images(source)
+    if limit is not None:
+        images = images[:limit]
+    # Never silently overwrite a previous run or user files.
+    output.mkdir(parents=True, exist_ok=False)
+    frames = []
+    started = time.monotonic()
+    for path in images:
+        image_started = time.monotonic()
+        with Image.open(path) as original:
+            original_size = original.size
+            image = original.convert("RGB")
+        if rotate:
+            image = image.rotate(-rotate, expand=True)
+        detections = detector.detect(
+            image, confidence=confidence, iou=iou, imgsz=imgsz,
+            tile_size=tile_size, overlap=overlap, max_det=max_det,
+        )
+        predictions = classifier.classify(image, detections) if classifier else [None] * len(detections)
+        masks = segmenter.segment(image, detections) if segmenter else [None] * len(detections)
+        if len(predictions) != len(detections) or len(masks) != len(detections):
+            raise ValueError("Model returned a different number of results than detections")
+        identity = path.name if source.is_file() else path.relative_to(source).as_posix()
+        frame_id = f"{path.stem}-{hashlib.sha256(identity.encode()).hexdigest()[:8]}"
+        frame_dir = output / frame_id
+        frame_dir.mkdir()
+        crops_dir = frame_dir / "crops"
+        crops_dir.mkdir()
+        annotation = image.copy()
+        records = []
+        for index, (detection, scores, mask_info) in enumerate(zip(detections, predictions, masks), 1):
+            record = make_hold_record(detection, index, scores, minimum_type_score, mask_info,
+                                      getattr(segmenter, "method", "sam2_box_prompt"))
+            if mask_info is not None:
+                record["segmentation_score_method"] = getattr(segmenter, "score_method", "predicted_mask_iou")
+            if mask_info is not None:
+                mask, _ = mask_info
+                if mask.shape != (image.height, image.width):
+                    raise ValueError("SAM mask dimensions differ from the processed image")
+                (frame_dir / "masks").mkdir(exist_ok=True)
+                mask_path = Path("masks") / f"{record['hold_id']}.png"
+                Image.fromarray(mask.astype(np.uint8) * 255).save(frame_dir / mask_path)
+                record["mask_path"] = mask_path.as_posix()
+                overlay = Image.new("RGB", image.size, COLORS.get(record["predicted_type"], "#b0b0b0"))
+                alpha = Image.fromarray(mask.astype(np.uint8) * 65)
+                annotation = Image.composite(overlay, annotation, alpha)
+                pixels = np.asarray(image)[mask]
+                record["median_rgb"] = np.median(pixels, axis=0).round().astype(int).tolist() if len(pixels) else None
+                record["color_method"] = "mask_median_rgb"  # Not route membership.
+            crop_path = Path("crops") / f"{record['hold_id']}.jpg"
+            image.crop(crop_box(detection.bbox, *image.size)).save(frame_dir / crop_path, quality=95)
+            record["crop_path"] = crop_path.as_posix()
+            records.append(record)
+        draw = ImageDraw.Draw(annotation)
+        for record in records:
+            color = COLORS.get(record["predicted_type"], "#b0b0b0")
+            draw.rectangle(record["bbox_xyxy"], outline=color, width=3)
+            x, y = record["bbox_xyxy"][:2]
+            label = record["grip_type"] or record["object_kind"]
+            score_text = (f"{record['type_score']:.2f}" if record["type_score"] is not None
+                          else f"SAM {record['detector_score']:.2f}")
+            text = f"{record['hold_id']} {label} {score_text}"
+            bounds = draw.textbbox((x, max(0, y - 13)), text)
+            draw.rectangle(bounds, fill="black")
+            draw.text((x, max(0, y - 13)), text, fill=color)
+        annotation.save(frame_dir / "annotated.jpg", quality=95)
+        frame = {
+            "schema_version": "1.0", "frame_id": frame_id,
+            "source_image": str(path.resolve()), "source_size_wh": list(original_size),
+            "processed_size_wh": list(image.size), "rotation_clockwise_degrees": rotate,
+            "coordinate_space": "processed_image_pixels",
+            "camera_registration_verified": False,
+            "hold_ids_are": "frame_local_not_multiview_tracks",
+            "holds": records, "elapsed_seconds": round(time.monotonic() - image_started, 3),
+        }
+        (frame_dir / "holds.json").write_text(json.dumps(frame, indent=2, allow_nan=False) + "\n")
+        counts = dict(Counter(r["grip_type"] or r["object_kind"] for r in records))
+        frames.append({"frame_id": frame_id, "source_image": str(path),
+                       "hold_count": len(records), "types": counts,
+                       "needs_review": sum(r["needs_review"] for r in records)})
+        print(f"{path.name}: {len(records)} detections; {counts}", flush=True)
+    summary = {
+        "schema_version": "1.0", "models": model_metadata or {},
+        "settings": {"confidence": confidence, "minimum_type_score": minimum_type_score,
+                     "nms_iou": iou, "imgsz": imgsz, "tile_size": tile_size,
+                     "tile_overlap": overlap, "max_det": max_det, "rotate": rotate},
+        "frame_count": len(frames), "detection_count": sum(f["hold_count"] for f in frames),
+        "segmentation_enabled": segmenter is not None,
+        "elapsed_seconds": round(time.monotonic() - started, 3), "frames": frames,
+        "evaluation": "Unlabeled inference; detection/type accuracy has not been measured.",
+    }
+    (output / "summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
+    from .gallery import build_gallery
+    build_gallery(output)
+    return summary

@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=77,<81"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "demo-hold-detection"
+version = "0.1.0"
+description = "DeMoSearch: climbing hold detection, type classification, and optional SAM 2 masks"
+readme = "README.md"
+requires-python = ">=3.10,<3.14"
+dependencies = [
+  "numpy>=1.26,<3",
+  "Pillow>=11,<13",
+  "torch==2.7.1",
+  "torchvision==0.22.1",
+  "ultralytics==8.3.249",
+]
+
+[project.optional-dependencies]
+dev = ["pytest==8.4.2", "nbformat==5.10.4"]
+
+[project.scripts]
+holds = "hold_detection.cli:main"
+
+[tool.setuptools.packages.find]
+where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+
+[[tool.uv.index]]
+name = "pytorch-cpu"
+url = "https://download.pytorch.org/whl/cpu"
+explicit = true
+
+[tool.uv.sources]
+torch = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
+torchvision = [{ index = "pytorch-cpu", marker = "sys_platform == 'linux' or sys_platform == 'win32'" }]
