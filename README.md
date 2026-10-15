@@ -39,6 +39,21 @@ Actual SAM GPU inference has not been validated on this CPU-only development mac
 Regenerate the notebook after notebook edits with
 `python scripts/build_colab_notebook.py`; it never embeds photos, weights or tokens.
 
+## Train crop classifiers
+
+The project now supports **ImageNet ResNet18 fine-tuning** and **frozen SigLIP +
+linear head**, with labeled YOLO/COCO crop preparation, cached embeddings,
+validation-selected checkpoints, restart and test reports. Artifacts plug into
+SAM 3 using `--classifier trained --classifier-weights /path/to/best.pt`.
+
+- [Training guide](docs/classifier-training.md)
+- [Training notebook in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Classifier_Training.ipynb)
+- [NYU Cloud Bursting jobs: two A100s](docs/nyu-hpc.md), account `csci_ga_2271-2026fa`,
+  partition `c24m170-a100-2`; data preparation and linear-head training use CPU jobs.
+
+Unlabeled gym photos are inference inputs, not supervised training labels.
+Full-dataset training and actual NYU multi-GPU jobs have not been executed here.
+
 ## Install
 
 Python 3.10–3.13. From this checkout (cloud tasks already have isolated checkouts;

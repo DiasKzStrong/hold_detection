@@ -125,6 +125,8 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
         for index, (detection, scores, mask_info) in enumerate(zip(detections, predictions, masks), 1):
             record = make_hold_record(detection, index, scores, minimum_type_score, mask_info,
                                       getattr(segmenter, "method", "sam2_box_prompt"))
+            if scores is not None and getattr(classifier, "score_method", None):
+                record["type_score_method"] = classifier.score_method
             if mask_info is not None:
                 record["segmentation_score_method"] = getattr(segmenter, "score_method", "predicted_mask_iou")
             if mask_info is not None:
@@ -142,7 +144,8 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
                 record["median_rgb"] = np.median(pixels, axis=0).round().astype(int).tolist() if len(pixels) else None
                 record["color_method"] = "mask_median_rgb"  # Not route membership.
             crop_path = Path("crops") / f"{record['hold_id']}.jpg"
-            image.crop(crop_box(detection.bbox, *image.size)).save(frame_dir / crop_path, quality=95)
+            crop_padding = getattr(classifier, "metadata", {}).get("crop_padding", 0.1)
+            image.crop(crop_box(detection.bbox, *image.size, padding=crop_padding)).save(frame_dir / crop_path, quality=95)
             record["crop_path"] = crop_path.as_posix()
             records.append(record)
         draw = ImageDraw.Draw(annotation)
@@ -181,7 +184,8 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
         "schema_version": "1.0", "models": model_metadata or {},
         "settings": {"confidence": confidence, "minimum_type_score": minimum_type_score,
                      "nms_iou": iou, "imgsz": imgsz, "tile_size": tile_size,
-                     "tile_overlap": overlap, "max_det": max_det, "rotate": rotate},
+                     "tile_overlap": overlap, "max_det": max_det, "rotate": rotate,
+                     "crop_padding": getattr(classifier, "metadata", {}).get("crop_padding", 0.1)},
         "frame_count": len(frames), "detection_count": sum(f["hold_count"] for f in frames),
         "segmentation_enabled": segmenter is not None,
         "timing_protocol": "CUDA synchronized; model loading excluded; first-image warmup included; frame elapsed includes image/crop export",

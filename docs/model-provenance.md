@@ -20,6 +20,11 @@ Upstream links the Diego Spaziani climbing-hold dataset:
 and synthetic images. We have not audited the dataset or its split, downloaded
 it, retrained the checkpoints, or independently reproduced its reported metrics.
 
+Subsequent source checks found shared training photographs with the Roboflow
+`climbing-holds-classification/holdclassificatore_v3_mix` project, whose version 2
+is named “Kaggle Version”. Full exports/splits have not been proven identical.
+See [training data provenance and split cautions](classifier-training.md).
+
 No LICENSE file was found in the selected reference revision. Its code and
 weight licensing must not be assumed to be MIT or otherwise unrestricted.
 Confirm permission/terms before redistribution or use outside the course.

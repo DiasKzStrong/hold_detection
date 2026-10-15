@@ -63,7 +63,7 @@ def _gpu_present():
     return result.returncode == 0 and bool(result.stdout.strip())
 
 
-def prepare_runtime(work: Path, project: Path, sam3=False, accelerator="auto"):
+def prepare_runtime(work: Path, project: Path, sam3=False, accelerator="auto", training=False):
     """Use Python 3.12 and private wheels even when Colab runs Python 3.13.
 
     Never import or repair the kernel's torch, and never inherit its site packages.
@@ -97,6 +97,10 @@ def prepare_runtime(work: Path, project: Path, sam3=False, accelerator="auto"):
               "pycocotools==2.0.11", "pillow>=11,<13", "matplotlib>=3.8,<4"]
     run_logged([*install, *TORCH_PACKAGES, *common], project,
                work / "logs/install_baseline.log", extra_env=tool_env)
+    if training:
+        run_logged([*install, *TORCH_PACKAGES, *common, "transformers==5.19.0",
+                    "huggingface-hub==2.2.0", "safetensors>=0.8,<1"], project,
+                   work / "logs/install_training.log", extra_env=tool_env)
     if sam3:
         dependencies = ["setuptools>=77,<81", "wheel>=0.43,<1", "einops==0.8.1", "decord==0.6.0",
                         "psutil>=5.9", "huggingface-hub==2.2.0", "timm==1.0.30", "iopath==0.1.10",
@@ -133,7 +137,7 @@ if cuda_available:
                         torch.tensor([1.], device='cuda'), 0.5)
     torch.cuda.synchronize()
 packages={}
-for p in ['torchvision','ultralytics','sam3','pycocotools','triton']:
+for p in ['torchvision','ultralytics','sam3','pycocotools','triton','transformers']:
     try: packages[p]=version(p)
     except PackageNotFoundError: packages[p]=None
 print(json.dumps({'python':sys.version.split()[0],'torch':torch.__version__,

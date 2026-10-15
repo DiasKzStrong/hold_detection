@@ -26,7 +26,7 @@ def build_notebook():
             | Experiment | Localization | Hold type |
             |:---|:---|:---|
             | **YOLO11s baseline** | Bounding boxes | Six classes from the detector head |
-            | **SAM 3 + CNN** | Text-prompted instance masks | Separate crop CNN |
+            | **SAM 3 + classifier** | Text-prompted instance masks | Legacy CNN or trained ResNet18/SigLIP |
 
             Start with 3 frames. Select **Runtime → Change runtime type → GPU**.
             Model inference uses a private Python 3.12 environment, even with a Python 3.13 kernel.
@@ -123,6 +123,11 @@ def build_notebook():
             YOLO_THRESHOLD = 0.35    # @param {type: "number"}
             SAM_THRESHOLD = 0.50     # @param {type: "number"}
             MIN_TYPE_SCORE = 0.50    # @param {type: "number"}
+            CLASSIFIER = 'cnn'  # @param ["cnn", "trained", "none"]
+            CLASSIFIER_WEIGHTS = ''  # @param {type: "string"}
+
+            if CLASSIFIER == 'trained' and not Path(CLASSIFIER_WEIGHTS).is_file():
+                raise ValueError('Set CLASSIFIER_WEIGHTS to your trained ResNet18/SigLIP best.pt artifact.')
 
             if MAX_IMAGES < 0 or ROTATE not in (-1, 0, 90, 180, 270):
                 raise ValueError('MAX_IMAGES must be >= 0; ROTATE must be -1, 0, 90, 180 or 270.')
@@ -179,10 +184,13 @@ def build_notebook():
             display(plot_comparison(RUNS, thresholds=THRESHOLDS)); plt.close('all')
         """),
         cell("markdown", "sam-heading", """
-            ## 4 · SAM 3 + crop CNN
+            ## 4 · SAM 3 + crop classifier
             SAM proposes masks independently from a text prompt; it does not receive YOLO boxes.
             Localization is compared separately from type classification quality.
             With `RUN_SAM3=False` or no GPU, the full YOLO baseline remains available.
+            For a trained ResNet18/SigLIP, set `CLASSIFIER='trained'` and provide `best.pt`.
+            Use [the training notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Classifier_Training.ipynb)
+            or the NYU SLURM jobs to produce that artifact.
         """),
         cell("code", "sam-setup", """
             # @title Set up SAM 3 and checkpoint access
@@ -200,7 +208,7 @@ def build_notebook():
                         if not token: raise ValueError('A token for an account with approved access to facebook/sam3 is required.')
                         os.environ['HF_TOKEN'] = token
                         del token
-                    PYTHON = prepare_runtime(WORK, PROJECT, sam3=True)
+                    PYTHON = prepare_runtime(WORK, PROJECT, sam3=True, training=CLASSIFIER == 'trained')
                     run_holds('fetch-sam3', log_name='fetch_sam3')
                     SAM_READY = True
                     print('SAM 3 ready. Token value is not displayed or saved.')
@@ -211,19 +219,20 @@ def build_notebook():
                 print('SAM 3 not run: disabled or no CUDA GPU. No SAM predictions will be fabricated.')
         """, hidden=True),
         cell("code", "sam3-run", """
-            RUNS.pop('SAM 3 + CNN', None)
-            THRESHOLDS.pop('SAM 3 + CNN', None)
+            RUNS.pop('SAM 3', None)
+            THRESHOLDS.pop('SAM 3', None)
             if SAM_READY:
                 sam_path = EXPERIMENT / ('sam3_' + uuid.uuid4().hex[:6])
                 args = ['sam3', SOURCE, '--output', sam_path, '--rotate', rotation,
                         '--prompt', PROMPT, '--conf', CANDIDATE_FLOOR, '--max-det', 500,
-                        '--classifier', 'cnn', '--min-type-score', MIN_TYPE_SCORE]
+                        '--classifier', CLASSIFIER, '--min-type-score', MIN_TYPE_SCORE]
+                if CLASSIFIER == 'trained': args += ['--classifier-weights', CLASSIFIER_WEIGHTS]
                 if MAX_IMAGES: args += ['--limit', MAX_IMAGES]
-                print('Running SAM 3 segmentation + CNN…')
+                print('Running SAM 3 segmentation +', CLASSIFIER, '…')
                 try:
                     run_holds(*args, log_name='sam3_inference')
-                    RUNS['SAM 3 + CNN'] = sam_path
-                    THRESHOLDS['SAM 3 + CNN'] = SAM_THRESHOLD
+                    RUNS['SAM 3'] = sam_path
+                    THRESHOLDS['SAM 3'] = SAM_THRESHOLD
                     print('SAM 3 finished on the same frames as YOLO.')
                 except RuntimeError as error:
                     print('SAM 3 inference failed:', error)

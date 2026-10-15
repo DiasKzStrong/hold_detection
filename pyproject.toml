@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "demo-hold-detection"
 version = "0.1.0"
-description = "DeMoSearch: climbing hold detection, type classification, and optional SAM 2 masks"
+description = "DeMoSearch: climbing hold detection, SAM segmentation, and supervised crop classifiers"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 dependencies = [
@@ -17,6 +17,7 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
+training = ["transformers==5.19.0", "huggingface-hub==2.2.0", "safetensors>=0.8,<1"]
 dev = ["pytest==8.4.2", "nbformat==5.10.4", "pycocotools==2.0.11", "ipywidgets==8.1.8", "pandas>=2.2,<4"]
 
 [project.scripts]

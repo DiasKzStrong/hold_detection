@@ -48,7 +48,7 @@ def test_experiment_settings_execute_without_gpu_or_authentication(tmp_path):
     notebook = load_notebook()
     source = next(c.source for c in notebook.cells if c.id == "settings")
     namespace = {"prepared": SimpleNamespace(kind="polycam"), "PROJECT": tmp_path,
-                 "datetime": datetime, "timezone": timezone, "uuid": uuid}
+                 "datetime": datetime, "timezone": timezone, "uuid": uuid, "Path": Path}
     exec(compile(source, "settings", "exec"), namespace)
     assert namespace["rotation"] == 90
     assert namespace["RUNS"] == {}
@@ -83,7 +83,7 @@ def test_sam_failure_suggests_larger_gpu_only_for_cuda_oom(tmp_path, capsys, err
     namespace = {"RUNS": {}, "THRESHOLDS": {}, "SAM_READY": True, "EXPERIMENT": tmp_path,
                  "uuid": uuid, "SOURCE": tmp_path, "rotation": 0, "PROMPT": "climbing hold",
                  "CANDIDATE_FLOOR": 0.05, "MIN_TYPE_SCORE": 0.5, "MAX_IMAGES": 1,
-                 "run_holds": fail}
+                 "run_holds": fail, "CLASSIFIER": "cnn"}
     exec(compile(source, "sam3-run", "exec"), namespace)
     output = capsys.readouterr().out
     assert error_message in output

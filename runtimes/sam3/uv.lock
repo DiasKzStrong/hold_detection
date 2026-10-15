@@ -148,6 +148,7 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "huggingface-hub", marker = "extra == 'training'", specifier = "==2.2.0" },
     { name = "ipywidgets", marker = "extra == 'dev'", specifier = "==8.1.8" },
     { name = "nbformat", marker = "extra == 'dev'", specifier = "==5.10.4" },
     { name = "numpy", specifier = ">=1.26,<3" },
@@ -155,13 +156,15 @@ requires-dist = [
     { name = "pillow", specifier = ">=11,<13" },
     { name = "pycocotools", marker = "extra == 'dev'", specifier = "==2.0.11" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==8.4.2" },
+    { name = "safetensors", marker = "extra == 'training'", specifier = ">=0.8,<1" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = "==2.7.1" },
     { name = "torch", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = "==2.7.1", index = "https://download.pytorch.org/whl/cpu" },
     { name = "torchvision", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = "==0.22.1" },
     { name = "torchvision", marker = "sys_platform == 'linux' or sys_platform == 'win32'", specifier = "==0.22.1", index = "https://download.pytorch.org/whl/cpu" },
+    { name = "transformers", marker = "extra == 'training'", specifier = "==5.19.0" },
     { name = "ultralytics", specifier = "==8.3.249" },
 ]
-provides-extras = ["dev"]
+provides-extras = ["training", "dev"]
 
 [[package]]
 name = "demosearch-sam3-runtime"
