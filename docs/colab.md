@@ -1,7 +1,8 @@
 # YOLO vs SAM 3 · Colab experiment
 
 [Open in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_SAM3_Colab.ipynb).
-Select a Python 3.12 GPU runtime and execute sections 1–8 in order. The default
+Select a GPU runtime and execute sections 1–8 in order. A Python 3.13 notebook
+kernel is supported: model inference runs in a separate Python 3.12 process. The default
 is three frames, not the whole scan. YOLO also works on CPU without HF access.
 
 ## What you see
@@ -25,13 +26,31 @@ checks out the resolved commit, and records its SHA. It refuses to overwrite
 local checkout changes. No base64 source payload is embedded in the notebook.
 For reproduction, set `CODE_REF` to a recorded commit instead of `main`.
 
-An isolated system-site-packages venv reuses Colab's CUDA PyTorch/torchvision/Triton
-without replacing them with this repository's CPU wheels. NumPy 1.26 and model
-dependencies live in that venv; tables/widgets use the notebook kernel. Installation
+An isolated venv uses Python 3.12, PyTorch 2.7.1, torchvision 0.22.1 and NumPy 1.26.
+It never imports or inherits Colab's system Torch; Python 3.13 kernels and a broken
+kernel Torch import do not require reinstalling packages in the notebook kernel.
+`uv` finds/downloads Python 3.12 and installs private official CUDA 12.6 wheels when
+`nvidia-smi` detects a GPU, otherwise CPU wheels. The first installation can take
+several minutes and CUDA wheels are a large download. Existing environments and
+results are not deleted. Tables/widgets still use the notebook kernel. Installation
 and inference logs are saved under `/content/demosearch-comparison/logs` instead
 of filling the notebook. The official SAM revision is
 `7f473cfd983d5eb43040ff608f66bff0d7bdcb53`. Native BF16 is used where supported,
 otherwise FP16, including on T4.
+
+The setup checks Torch/torchvision versions, `torch.library.custom_op`, the NumPy
+bridge, CPU NMS, and GPU NMS when CUDA is available before accepting the runtime.
+The private environment is under `runtime-py312-cu126-v1` (or `…-cpu-v1`), not the
+legacy `venv` directory. Runtime/GPU versions are printed and exported.
+
+### Recovering from a system Torch import error
+
+If an older notebook fails at `import torch` with “partially initialized module”
+or a missing `torch.library`, save/download any results first, restart the Colab
+session, and open the latest notebook from the GitHub link above. Run the new setup
+cell, which does not import kernel Torch. Merely rerunning the old cell or changing
+the Python-version check does not repair a partially initialized Torch package.
+The traceback alone does not establish why that system installation is broken.
 
 SAM weights require approved access at <https://huggingface.co/facebook/sam3>.
 Provide a read token through the Colab Secret `HF_TOKEN` or the hidden prompt.
@@ -97,6 +116,10 @@ regeneration tests. Evaluation tests cover true/false positives, missing objects
 rotation, polygon masks, confidence filtering, and actual pycocotools AP calculations.
 Real YOLO inference and the new static visualization were checked on three user
 Polycam frames. These unlabeled frames provide no accuracy estimate.
+The isolated runtime bootstrap was also exercised from an actual Python 3.13
+process with kernel Torch imports explicitly forbidden: Python 3.12, Torch and
+torchvision health checks passed, and YOLO processed one user frame (51 candidates).
+The private `uv` bootstrap and managed Python 3.12 download were checked separately.
 
 **Actual SAM GPU/Colab inference has not been executed on the CPU-only development
 machine.** Structural tests and synthetic GT tests do not establish model accuracy

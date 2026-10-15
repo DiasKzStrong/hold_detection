@@ -23,7 +23,10 @@ on the same photos. It has a frame selector, side-by-side images, threshold slid
 boxes/masks toggles, crop grids, latency plots and an offline report download.
 Start with its default of three photos. YOLO runs first, even without GPU/HF access.
 
-Use a Python 3.12 GPU runtime for SAM. Its official source revision is pinned;
+Select a GPU runtime for SAM; the notebook creates its own Python 3.12 model
+environment, including when Colab's kernel uses Python 3.13. It does not import or
+modify the kernel's PyTorch. The first setup downloads pinned CPU/CUDA wheels and
+can take several minutes. SAM's official source revision is pinned;
 approved access to `facebook/sam3` and `HF_TOKEN` in Colab Secrets (or a hidden
 prompt) are required. The notebook checks out this public repository and records
 the exact commit. Photos, Polycam raw-data ZIPs and Drive inputs are supported.

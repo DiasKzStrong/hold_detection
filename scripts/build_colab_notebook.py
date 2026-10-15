@@ -28,7 +28,8 @@ def build_notebook():
             | **YOLO11s baseline** | Bounding boxes | Six classes from the detector head |
             | **SAM 3 + CNN** | Text-prompted instance masks | Separate crop CNN |
 
-            Start with 3 frames. Select **Runtime → Change runtime type → GPU**, Python 3.12.
+            Start with 3 frames. Select **Runtime → Change runtime type → GPU**.
+            Model inference uses a private Python 3.12 environment, even with a Python 3.13 kernel.
             YOLO also works on CPU without Hugging Face. SAM requires a GPU and approved
             access to [facebook/sam3](https://huggingface.co/facebook/sam3).
 
@@ -38,8 +39,9 @@ def build_notebook():
         """),
         cell("markdown", "setup-heading", """
             ## 1 · Environment
-            Setup cells are collapsed. Colab's existing CUDA PyTorch is reused;
-            dependencies are installed in a separate virtual environment. Source code
+            Setup cells are collapsed. A private Python 3.12 environment installs pinned
+            PyTorch/torchvision wheels without importing or modifying Colab's system Torch.
+            The first installation may take several minutes. Source code
             comes from our public GitHub repository, without base64 payloads; the exact
             commit is recorded with the results.
         """),
@@ -48,14 +50,11 @@ def build_notebook():
             import json, os, subprocess, sys, uuid
             from pathlib import Path
             from datetime import datetime, timezone
-            import torch
 
             CODE_REF = 'main'  # @param {type: "string"}
             WORK = Path('/content/demosearch-comparison')
             PROJECT = WORK / 'project'
             WORK.mkdir(parents=True, exist_ok=True)
-            if sys.version_info[:2] != (3, 12):
-                raise RuntimeError('Select a Python 3.12 runtime: SAM dependencies use NumPy 1.26.')
             repository = 'https://github.com/DiasKzStrong/hold_detection.git'
             if not PROJECT.exists():
                 subprocess.run(['git', 'clone', '--quiet', '--depth', '1', repository, str(PROJECT)], check=True)
@@ -73,11 +72,13 @@ def build_notebook():
             if str(PROJECT / 'src') not in sys.path: sys.path.insert(0, str(PROJECT / 'src'))
             from hold_detection.notebook_runtime import prepare_runtime, run_cli, runtime_info
             PYTHON = prepare_runtime(WORK, PROJECT)
+            MODEL_ENV = runtime_info(PYTHON, PROJECT)
 
             def run_holds(*arguments, log_name='command'):
                 return run_cli(PYTHON, PROJECT, list(arguments), WORK / 'logs' / (log_name + '.log'))
 
-            print('Ready ·', torch.cuda.get_device_name(0) if torch.cuda.is_available() else 'CPU baseline')
+            print('Ready ·', MODEL_ENV['gpu'] if MODEL_ENV['cuda_available'] else 'CPU baseline')
+            print('Kernel Python:', sys.version.split()[0], '| model Python:', MODEL_ENV['python'])
             print('Code commit:', CODE_SHA, '| installation logs:', WORK / 'logs')
         """, hidden=True),
         cell("markdown", "data-heading", """
@@ -187,7 +188,7 @@ def build_notebook():
             # @title Set up SAM 3 and checkpoint access
             import getpass
             SAM_READY = False
-            if RUN_SAM3 and torch.cuda.is_available():
+            if RUN_SAM3 and MODEL_ENV['cuda_available']:
                 print('Preparing SAM 3; installation and checkpoint download may take several minutes…')
                 from google.colab import userdata
                 try:

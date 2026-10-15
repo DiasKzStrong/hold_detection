@@ -54,10 +54,22 @@ def test_experiment_settings_execute_without_gpu_or_authentication(tmp_path):
     assert namespace["RUNS"] == {}
     assert namespace["EXPERIMENT"].is_dir()
     assert namespace["CANDIDATE_FLOOR"] < namespace["YOLO_THRESHOLD"]
-    from hold_detection.notebook_runtime import prepare_runtime
-    import inspect
-    setup = inspect.getsource(prepare_runtime)
-    assert "system_site_packages=True" in setup and "torch==" not in setup
+
+
+def test_bootstrap_and_sam_setup_never_import_kernel_torch():
+    notebook = load_notebook()
+    for cell_id in ("bootstrap", "sam-setup"):
+        source = next(c.source for c in notebook.cells if c.id == cell_id)
+        tree = ast.parse(source)
+        for node in ast.walk(tree):
+            if isinstance(node, ast.Import):
+                assert all(alias.name.split(".")[0] != "torch" for alias in node.names)
+            if isinstance(node, ast.ImportFrom):
+                assert (node.module or "").split(".")[0] != "torch"
+        assert "torch." not in source
+    bootstrap = next(c.source for c in notebook.cells if c.id == "bootstrap")
+    assert "MODEL_ENV = runtime_info(PYTHON, PROJECT)" in bootstrap
+    assert "Select a Python 3.12 runtime" not in bootstrap
 
 
 def jpeg_bytes():
