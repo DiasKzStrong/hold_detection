@@ -21,29 +21,30 @@ def build_notebook():
     cells = [
         cell("markdown", "intro", """
             # DeMoSearch · YOLO vs SAM 3
-            **Один набор фото → две модели → наглядное сравнение → измеримые метрики.**
+            **One photo set → two models → visual comparison → measurable results.**
 
-            | Эксперимент | Локализация | Тип зацепа |
+            | Experiment | Localization | Hold type |
             |:---|:---|:---|
-            | **YOLO11s baseline** | Bounding boxes | Шесть классов из detector head |
-            | **SAM 3 + CNN** | Text-prompted instance masks | Отдельная crop CNN |
+            | **YOLO11s baseline** | Bounding boxes | Six classes from the detector head |
+            | **SAM 3 + CNN** | Text-prompted instance masks | Separate crop CNN |
 
-            Начни с 3 кадров. Включи **Runtime → Change runtime type → GPU**, Python 3.12.
-            YOLO работает и на CPU, без Hugging Face. Для SAM нужны GPU и одобренный
-            доступ к [facebook/sam3](https://huggingface.co/facebook/sam3).
+            Start with 3 frames. Select **Runtime → Change runtime type → GPU**, Python 3.12.
+            YOLO also works on CPU without Hugging Face. SAM requires a GPU and approved
+            access to [facebook/sam3](https://huggingface.co/facebook/sam3).
 
-            **Результаты:** оригинал / YOLO / SAM рядом, выбор кадра и порогов,
-            сетка crops, latency и score plots. С COCO-разметкой — precision/recall/F1,
-            box AP, mask AP/IoU и confusion matrix типов. **Без GT качество не выдумывается.**
+            **Results:** original / YOLO / SAM side by side, frame and threshold controls,
+            crop grids, latency and score plots. With COCO annotations: precision/recall/F1,
+            box AP, mask AP/IoU and type confusion matrices. **No ground truth, no quality claims.**
         """),
         cell("markdown", "setup-heading", """
-            ## 1 · Окружение
-            Служебные ячейки свёрнуты. Используется готовый CUDA PyTorch Colab;
-            зависимости устанавливаются в отдельный venv. Код берётся из нашего
-            публичного GitHub, без base64-блоков; точный commit сохраняется в результатах.
+            ## 1 · Environment
+            Setup cells are collapsed. Colab's existing CUDA PyTorch is reused;
+            dependencies are installed in a separate virtual environment. Source code
+            comes from our public GitHub repository, without base64 payloads; the exact
+            commit is recorded with the results.
         """),
         cell("code", "bootstrap", """
-            # @title Подготовить окружение (один раз)
+            # @title Set up the environment (once)
             import json, os, subprocess, sys, uuid
             from pathlib import Path
             from datetime import datetime, timezone
@@ -54,20 +55,20 @@ def build_notebook():
             PROJECT = WORK / 'project'
             WORK.mkdir(parents=True, exist_ok=True)
             if sys.version_info[:2] != (3, 12):
-                raise RuntimeError('Выбери Python 3.12 runtime: зависимости SAM используют NumPy 1.26.')
+                raise RuntimeError('Select a Python 3.12 runtime: SAM dependencies use NumPy 1.26.')
             repository = 'https://github.com/DiasKzStrong/hold_detection.git'
             if not PROJECT.exists():
                 subprocess.run(['git', 'clone', '--quiet', '--depth', '1', repository, str(PROJECT)], check=True)
             if not (PROJECT / '.git').is_dir():
-                raise RuntimeError('Папка project занята другими файлами; выбери другой WORK.')
+                raise RuntimeError('The project directory contains unrelated files; choose another WORK path.')
             dirty = subprocess.check_output(['git', '-C', str(PROJECT), 'status', '--porcelain'], text=True)
             if dirty.strip():
-                raise RuntimeError('Сохрани изменения в project перед обновлением; они не перезаписываются.')
+                raise RuntimeError('Save local project changes before updating; they will not be overwritten.')
             subprocess.run(['git', '-C', str(PROJECT), 'fetch', '--quiet', 'origin', CODE_REF], check=True)
             CODE_SHA = subprocess.check_output(['git', '-C', str(PROJECT), 'rev-parse', 'FETCH_HEAD'], text=True).strip()
             previous = subprocess.check_output(['git', '-C', str(PROJECT), 'rev-parse', 'HEAD'], text=True).strip()
             if previous != CODE_SHA and 'hold_detection' in sys.modules:
-                raise RuntimeError('Код обновился: перезапусти runtime, чтобы не смешивать версии модулей.')
+                raise RuntimeError('Source code has changed: restart the runtime to avoid mixing module versions.')
             subprocess.run(['git', '-C', str(PROJECT), 'checkout', '--quiet', '--detach', CODE_SHA], check=True)
             if str(PROJECT / 'src') not in sys.path: sys.path.insert(0, str(PROJECT / 'src'))
             from hold_detection.notebook_runtime import prepare_runtime, run_cli, runtime_info
@@ -80,12 +81,12 @@ def build_notebook():
             print('Code commit:', CODE_SHA, '| installation logs:', WORK / 'logs')
         """, hidden=True),
         cell("markdown", "data-heading", """
-            ## 2 · Данные и параметры
-            Загрузи JPEG/PNG, ZIP с фото или `wallA_1_raw_data.zip`. Из Polycam выбираются
-            RGB-кадры, а не depth PNG. Для больших наборов есть режим Google Drive.
+            ## 2 · Data and settings
+            Upload JPEG/PNG images, a photo ZIP, or `wallA_1_raw_data.zip`. For Polycam,
+            RGB frames are selected instead of depth PNGs. Use Google Drive for larger datasets.
         """),
         cell("code", "upload-inputs", """
-            # @title Загрузить фото
+            # @title Load photos
             from google.colab import files, drive
             from hold_detection.colab_support import prepare_inputs
 
@@ -105,7 +106,7 @@ def build_notebook():
                 finally:
                     os.chdir(previous_directory)
                 if not uploaded or any(Path(n).name != n for n in uploaded):
-                    raise ValueError('Выбери фото или один ZIP с простыми именами файлов.')
+                    raise ValueError('Select photos or one ZIP with filenames that contain no directory paths.')
                 selected = [upload / name for name in uploaded]
                 del uploaded
             prepared = prepare_inputs(selected, WORK / 'data' / data_id)
@@ -123,11 +124,11 @@ def build_notebook():
             MIN_TYPE_SCORE = 0.50    # @param {type: "number"}
 
             if MAX_IMAGES < 0 or ROTATE not in (-1, 0, 90, 180, 270):
-                raise ValueError('MAX_IMAGES >= 0; ROTATE = -1, 0, 90, 180 или 270')
+                raise ValueError('MAX_IMAGES must be >= 0; ROTATE must be -1, 0, 90, 180 or 270.')
             if not all(0 <= v <= 1 for v in [CANDIDATE_FLOOR, YOLO_THRESHOLD, SAM_THRESHOLD, MIN_TYPE_SCORE]):
-                raise ValueError('Scores должны быть в [0,1]')
+                raise ValueError('Scores must be in [0, 1].')
             if CANDIDATE_FLOOR > min(YOLO_THRESHOLD, SAM_THRESHOLD):
-                raise ValueError('Candidate floor должен быть не выше порогов просмотра.')
+                raise ValueError('The candidate floor must not exceed the viewing thresholds.')
             rotation = (90 if prepared.kind == 'polycam' else 0) if ROTATE == -1 else ROTATE
             experiment_id = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:6]
             EXPERIMENT = PROJECT / 'runs' / ('comparison_' + experiment_id)
@@ -136,10 +137,10 @@ def build_notebook():
             print('Preview rotation:', rotation, '| images:', MAX_IMAGES or 'all')
         """),
         cell("markdown", "protocol-note", """
-            `MAX_IMAGES=0` — все кадры. `ROTATE=-1` — 90° для нашего Polycam-скана,
-            иначе 0°; проверь preview. Низкий `CANDIDATE_FLOOR` сохраняет proposals
-            для AP, а пороги просмотра скрывают слабые предсказания без повторного inference.
-            AP ограничен этим floor. Scores YOLO и SAM **не откалиброваны друг относительно друга**.
+            `MAX_IMAGES=0` selects all frames. `ROTATE=-1` means 90° for our Polycam scan
+            and 0° otherwise; check the preview. A low `CANDIDATE_FLOOR` preserves proposals
+            for AP, while viewing thresholds hide weak predictions without rerunning inference.
+            AP is limited by this floor. YOLO and SAM scores **are not calibrated against each other**.
         """),
         cell("code", "preview", """
             import matplotlib.pyplot as plt
@@ -159,9 +160,9 @@ def build_notebook():
         """),
         cell("markdown", "baseline-heading", """
             ## 3 · YOLO11s baseline
-            Детекция и тип из одной модели. Этот блок не требует HF_TOKEN.
-            Время модели измеряется отдельно от экспорта картинок; загрузка весов исключена,
-            первый кадр включает warmup. На GPU таймеры синхронизированы.
+            Detection and hold types come from one model. This section does not require HF_TOKEN.
+            Model latency is measured separately from image export; weight loading is excluded,
+            and the first frame includes warmup. GPU timers are synchronized.
         """),
         cell("code", "baseline", """
             print('Running YOLO baseline…')
@@ -178,12 +179,12 @@ def build_notebook():
         """),
         cell("markdown", "sam-heading", """
             ## 4 · SAM 3 + crop CNN
-            SAM сам предлагает masks по тексту; YOLO boxes ему не передаются.
-            Локализация сравнивается отдельно от качества типов.
-            При `RUN_SAM3=False` или отсутствии GPU остаётся полноценный YOLO baseline.
+            SAM proposes masks independently from a text prompt; it does not receive YOLO boxes.
+            Localization is compared separately from type classification quality.
+            With `RUN_SAM3=False` or no GPU, the full YOLO baseline remains available.
         """),
         cell("code", "sam-setup", """
-            # @title Подготовить SAM 3 и доступ к весам
+            # @title Set up SAM 3 and checkpoint access
             import getpass
             SAM_READY = False
             if RUN_SAM3 and torch.cuda.is_available():
@@ -195,7 +196,7 @@ def build_notebook():
                             token = userdata.get('HF_TOKEN')
                         except (userdata.SecretNotFoundError, userdata.NotebookAccessError):
                             token = getpass.getpass('Hugging Face read token (hidden): ').strip()
-                        if not token: raise ValueError('Нужен токен аккаунта с одобренным доступом к facebook/sam3.')
+                        if not token: raise ValueError('A token for an account with approved access to facebook/sam3 is required.')
                         os.environ['HF_TOKEN'] = token
                         del token
                     PYTHON = prepare_runtime(WORK, PROJECT, sam3=True)
@@ -228,9 +229,9 @@ def build_notebook():
                     print('YOLO remains available. For GPU OOM, try a larger GPU and rerun this cell.')
         """),
         cell("markdown", "viewer-heading", """
-            ## 5 · Сравнение кадр за кадром
-            Выбери кадр, меняй пороги, включай masks/boxes. Подписи ID по умолчанию
-            выключены, чтобы не закрывать зацепы. Типы и scores смотри в crops ниже.
+            ## 5 · Frame-by-frame comparison
+            Select a frame, adjust thresholds, and toggle masks/boxes. ID labels are off
+            by default to avoid obscuring holds. Inspect types and scores in the crops below.
         """),
         cell("code", "viewer", """
             from google.colab import output
@@ -259,17 +260,17 @@ def build_notebook():
             display(widgets.VBox([crop_model, crop_output])); show_crops()
         """),
         cell("markdown", "gt-heading", """
-            ## 6 · Ground truth — опционально
-            Для quality metrics загрузи **COCO instance JSON** из CVAT/Roboflow.
-            Разметь все видимые holds/volumes на оцениваемых кадрах; частичная разметка
-            даст ложные FP. Названия images должны совпадать с файлами фото.
+            ## 6 · Ground truth — optional
+            Upload a **COCO instance JSON** from CVAT/Roboflow for quality metrics.
+            Annotate all visible holds/volumes on evaluated frames; partial annotations
+            produce spurious false positives. Image filenames must match the uploaded photos.
 
-            Категории `hold` дают detection metrics; `crimp/jug/pinch/pocket/sloper/volume`
-            дополнительно дают type metrics. Полигональные masks или COCO RLE нужны для mask AP.
-            YOLO baseline не имеет masks: mask AP у него **N/A**, не 0.
+            The `hold` category enables detection metrics; `crimp/jug/pinch/pocket/sloper/volume`
+            also enable type metrics. Polygon masks or COCO RLE are required for mask AP.
+            The YOLO baseline has no masks: its mask AP is **N/A**, not 0.
 
-            `source` — разметка исходных пикселей, поворот применяется автоматически.
-            `processed` — разметка уже повёрнутых изображений. Без GT остаются только diagnostics.
+            `source` uses annotations in original-image pixels; rotation is applied automatically.
+            `processed` uses annotations on already-rotated images. Without GT, only diagnostics are available.
         """),
         cell("code", "gt-upload", """
             USE_GROUND_TRUTH = False  # @param {type: "boolean"}
@@ -285,21 +286,21 @@ def build_notebook():
                 finally:
                     os.chdir(previous_directory)
                 if len(uploaded) != 1 or not next(iter(uploaded)).lower().endswith('.json'):
-                    raise ValueError('Выбери один COCO JSON.')
+                    raise ValueError('Select one COCO JSON file.')
                 GT_FILE = annotation_dir / next(iter(uploaded))
                 del uploaded
             print('Quality metrics:', 'COCO annotations supplied' if GT_FILE else 'unavailable — no ground truth')
         """),
         cell("markdown", "metrics-heading", """
-            ## 7 · Метрики
-            Пороги берутся из viewer **на момент выполнения этой ячейки**. После изменения
-            sliders выполни её снова. AP использует все сохранённые proposals, а P/R/F1 —
-            выбранные пороги. Сопоставление class-agnostic, one-to-one, IoU ≥ 0.50, maxDets=500.
-            AP50–95 имеет COCO IoU-сетку, но лимит 500 явно отличается от стандартных 100.
+            ## 7 · Metrics
+            Thresholds are read from the viewer **when this cell runs**. Rerun it after
+            changing the sliders. AP uses all saved proposals, while P/R/F1 use the
+            selected thresholds. Matching is class-agnostic, one-to-one, IoU ≥ 0.50, maxDets=500.
+            AP50–95 uses the COCO IoU grid, but the limit of 500 differs from the standard 100.
 
-            Accuracy/F1 типов считаются на matched GT; отдельно показаны coverage и доля
-            всех typed GT, которые найдены **и** классифицированы верно. Это не позволяет
-            скрыть пропущенные holds за высокой conditional accuracy.
+            Type accuracy/F1 are computed on matched GT; coverage and the fraction of all
+            typed GT that are both detected **and** correctly classified are shown separately.
+            This prevents high conditional accuracy from hiding missed holds.
         """),
         cell("code", "metrics", """
             import pandas as pd
@@ -338,10 +339,10 @@ def build_notebook():
                 print('Green = TP · red = FP · dashed orange = missed GT. Types are evaluated separately.')
         """),
         cell("markdown", "export-heading", """
-            ## 8 · Скачать эксперимент
-            ZIP содержит обе галереи, masks/crops, comparison figures, metrics.csv,
-            comparison.json и версии runtime. Токены и веса в архив не входят.
-            Открой `report_…/index.html` после распаковки всей папки.
+            ## 8 · Download the experiment
+            The ZIP contains available model galleries, masks/crops, comparison figures,
+            metrics.csv, comparison.json and runtime versions. Tokens and weights are excluded.
+            Extract the entire folder and open `report_…/index.html`.
         """),
         cell("code", "export", """
             from zipfile import ZipFile, ZIP_DEFLATED
@@ -361,11 +362,12 @@ def build_notebook():
         """),
         cell("markdown", "limits", """
             ---
-            **Ограничения эксперимента.** CNN — baseline: 69/100 correct на авторских
-            sample-crops, не на нашем зале. Тип хвата может быть не виден с выбранного
-            ракурса. Обе модели могут находить таблички вместо holds. Не дели соседние
-            кадры одного скана случайно между train/test. Реальный SAM GPU inference
-            в среде разработки не проверен; его выполняет этот Colab runtime.
+            **Experiment limitations.** The CNN is a baseline: 69/100 correct on the
+            upstream author's sample crops, not on our gym. Grip type may not be visible
+            from a particular viewpoint. Both models may mistake route tags for holds.
+            Do not randomly split neighboring frames from one scan between train/test.
+            Real SAM GPU inference has not been verified in the development environment;
+            it runs in this Colab runtime.
         """),
     ]
     return {"nbformat": 4, "nbformat_minor": 5,
