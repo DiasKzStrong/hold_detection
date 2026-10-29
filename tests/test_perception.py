@@ -1,4 +1,5 @@
 import json
+from pathlib import Path
 from zipfile import ZipFile
 
 import numpy as np
@@ -11,6 +12,7 @@ from hold_detection.evaluation import classification_metrics, evaluate_crops
 from hold_detection.geometry import Detection, box_iou, canonical_type, crop_box, merge_detections, tile_windows
 from hold_detection.pipeline import collect_images, make_hold_record, run_inference
 from hold_detection.polycam import GROUPS, inspect_archive, prepare_archive
+from hold_detection.wall_bundle import inspect_wall_bundle, prepare_wall_bundle
 
 
 def test_nms_merges_type_disagreement_but_keeps_hold_on_volume():
@@ -246,12 +248,16 @@ def test_masked_polycam_observation_exports_metric_spatial_evidence(tmp_path):
     assert spatial["median_depth_m"] == pytest.approx(2.0)
     assert spatial["protrusion_m"] == pytest.approx(0.2)
     assert spatial["position_capture_m"][2] == pytest.approx(2.0)
+    assert len(spatial["point_samples_capture_m"]) == 4
     assert scene["reconstruction"]["status"] == "multi_view_rgbd_fusion"
     assert scene["reconstruction"]["glb_registration"] == "not_registered"
     assert len(scene["physical_holds"]) == 1
     physical = scene["physical_holds"][0]
     assert physical["position_3d_m"][2] == pytest.approx(2.0)
     assert physical["protrusion_m"] == pytest.approx(0.2)
+    assert physical["aabb_volume_m3"] == 0
+    assert physical["protrusion_prism_volume_m3"] > 0
+    assert physical["fusion_method"] == "route_color_and_3d_point_overlap"
     assert physical["surface_normal"] == pytest.approx([0.0, 0.0, -1.0])
     assert len(physical["observation_ids"]) == 2
 
@@ -286,6 +292,31 @@ def test_polycam_import_matches_frames_and_preserves_existing_outputs(tmp_path):
         prepare_archive(archive, output)
     with pytest.raises(ValueError, match="corrected_images"):
         run_inference(output, tmp_path / "bad", FakeDetector([]))
+
+
+def test_wall_bundle_discovers_and_prepares_project_layout(tmp_path):
+    wall = tmp_path / "wallC_overhang_right"
+    wall.mkdir()
+    archive = wall / "wallC_raw_data.zip"
+    make_archive(archive)
+    (wall / "wallC_scan.glb").write_bytes(b"glTF fixture")
+    (wall / "wallC_obj.zip").write_bytes(b"backup fixture")
+    (wall / "yellow_v3.HEIC").write_bytes(b"photo fixture")
+    (wall / "route_notes.txt").write_text("Route 1: yellow")
+
+    info = inspect_wall_bundle(wall)
+    assert info["ready"]
+    assert info["wall_id"] == "wallC_overhang_right"
+    assert info["raw_archive_info"]["complete_frame_ids"] == ["123"]
+    assert info["route_photos"][0].endswith("yellow_v3.HEIC")
+    assert info["route_notes"].endswith("route_notes.txt")
+
+    prepared = prepare_wall_bundle(wall, tmp_path / "prepared-wall")
+    assert Path(prepared["prepared_rgb_source"]).name == "corrected_images"
+    assert Path(prepared["prepared_glb"]).read_bytes() == b"glTF fixture"
+    assert Path(prepared["prepared_capture"]).joinpath(
+        "keyframes/depth/123.png"
+    ).is_file()
 
 
 @pytest.mark.parametrize("name", ["../escape.jpg", "/absolute.jpg", "keyframes/../../escape.jpg"])

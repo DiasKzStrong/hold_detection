@@ -81,6 +81,9 @@ def estimate_polycam_spatial_evidence(
     ])
     translation = np.array([camera[f"t_{row}3"] for row in range(3)])
     points_capture = points_camera @ rotation.T + translation
+    sample_count = min(128, len(points_capture))
+    sample_indices = np.linspace(0, len(points_capture) - 1, sample_count, dtype=int)
+    point_samples_capture = points_capture[sample_indices]
 
     ring = _dilate(mask) & ~mask & (depth > 0) & high_confidence
     if np.count_nonzero(ring) < 3:
@@ -114,6 +117,7 @@ def estimate_polycam_spatial_evidence(
         "position_capture_m": np.median(points_capture, axis=0).round(6).tolist(),
         "size_camera_m": np.ptp(points_camera, axis=0).round(6).tolist(),
         "size_capture_m": np.ptp(points_capture, axis=0).round(6).tolist(),
+        "point_samples_capture_m": point_samples_capture.round(5).tolist(),
         "surface_normal_capture": surface_normal_capture,
         "neighbor_surface_depth_m": (
             round(surface_depth, 6) if surface_depth is not None else None

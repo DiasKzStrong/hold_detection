@@ -99,7 +99,23 @@ def _render_routes(run: Path, frame_path: Path, frame: dict) -> None:
     overlay.save(frame_path.parent / "routes.jpg", quality=95)
 
 
-def _fuse_spatial_observations(observations: list[dict], distance_m: float) -> list[dict]:
+def _point_overlap(first: dict, second: dict, tolerance_m: float) -> float:
+    first_points = np.asarray(first.get("point_samples_capture_m", []), dtype=float)
+    second_points = np.asarray(second.get("point_samples_capture_m", []), dtype=float)
+    if not len(first_points) or not len(second_points):
+        return 0.0
+    distances = np.linalg.norm(
+        first_points[:, None, :] - second_points[None, :, :], axis=2
+    )
+    first_coverage = float(np.mean(np.min(distances, axis=1) <= tolerance_m))
+    second_coverage = float(np.mean(np.min(distances, axis=0) <= tolerance_m))
+    return min(first_coverage, second_coverage)
+
+
+def _fuse_spatial_observations(
+    observations: list[dict], distance_m: float, overlap_tolerance_m: float = 0.04,
+    minimum_overlap: float = 0.12,
+) -> list[dict]:
     spatial = [item for item in observations if item.get("spatial_evidence")]
     spatial.sort(key=lambda item: (
         item.get("route_candidate_id") or "",
@@ -113,12 +129,24 @@ def _fuse_spatial_observations(observations: list[dict], distance_m: float) -> l
         for group in groups:
             if group[0].get("route_candidate_id") != observation.get("route_candidate_id"):
                 continue
+            if group[0]["object_kind"] != observation["object_kind"]:
+                continue
             if any(member["frame_id"] == observation["frame_id"] for member in group):
                 continue
             center = np.median([
                 member["spatial_evidence"]["position_capture_m"] for member in group
             ], axis=0)
-            if float(np.linalg.norm(position - center)) <= distance_m:
+            center_distance = float(np.linalg.norm(position - center))
+            overlap = max(
+                _point_overlap(
+                    observation["spatial_evidence"], member["spatial_evidence"],
+                    overlap_tolerance_m,
+                )
+                for member in group
+            )
+            if center_distance <= distance_m and (
+                overlap >= minimum_overlap or center_distance <= overlap_tolerance_m
+            ):
                 matching = group
                 break
         if matching is None:
@@ -143,6 +171,13 @@ def _fuse_spatial_observations(observations: list[dict], distance_m: float) -> l
         if normal is not None and np.linalg.norm(normal):
             normal = normal / np.linalg.norm(normal)
         protrusions = [item["protrusion_m"] for item in evidence if item["protrusion_m"] is not None]
+        aabb_volume = float(np.prod(np.maximum(size, 0.0)))
+        median_protrusion = float(np.median(protrusions)) if protrusions else None
+        footprint_extents = np.sort(np.maximum(size, 0.0))[-2:]
+        protrusion_prism_volume = (
+            float(np.prod(footprint_extents) * median_protrusion)
+            if median_protrusion is not None else None
+        )
         physical_holds.append({
             "physical_hold_id": f"physical_hold_{index:04d}",
             "route_candidate_id": group[0].get("route_candidate_id"),
@@ -150,16 +185,23 @@ def _fuse_spatial_observations(observations: list[dict], distance_m: float) -> l
             "coordinate_frame": "polycam_capture_unaligned",
             "position_3d_m": position.round(6).tolist(),
             "estimated_size_m": size.round(6).tolist(),
+            "aabb_volume_m3": round(aabb_volume, 9),
+            "protrusion_prism_volume_m3": (
+                round(protrusion_prism_volume, 9)
+                if protrusion_prism_volume is not None else None
+            ),
             "surface_normal": (
                 normal.round(6).tolist() if normal is not None else None
             ),
             "protrusion_m": (
-                round(float(np.median(protrusions)), 6) if protrusions else None
+                round(median_protrusion, 6) if median_protrusion is not None else None
             ),
             "observation_ids": [item["observation_id"] for item in group],
             "observation_count": len(group),
-            "fusion_method": "route_color_and_capture_position_radius",
+            "fusion_method": "route_color_and_3d_point_overlap",
             "fusion_distance_m": distance_m,
+            "point_overlap_tolerance_m": overlap_tolerance_m,
+            "minimum_point_overlap": minimum_overlap,
             "needs_review": True,
         })
     return physical_holds
@@ -267,12 +309,19 @@ def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
 
     fusion_distance_m = 0.12
     physical_holds = _fuse_spatial_observations(scene_observations, fusion_distance_m)
+    glb_candidates = set()
+    for _, frame in frames:
+        source = Path(frame["source_image"])
+        if source.parent.name in {"corrected_images", "images"}:
+            capture_root = source.parent.parent.parent
+            glb_candidates.update(capture_root.parent.glob("*.glb"))
+    glb_path = str(next(iter(glb_candidates)).resolve()) if len(glb_candidates) == 1 else None
 
     scene = {
         "schema_version": "2.0-draft",
         "wall_capture_id": run.name,
         "coordinate_space": "image",
-        "route_candidate_assumption": "one_color_group_proposes_one_route_with_human_review",
+        "route_candidate_assumption": "color_groups_are_candidates_not_unique_routes",
         "color_distance_threshold": color_distance_threshold,
         "route_candidates": route_candidates,
         "frames": scene_frames,
@@ -285,6 +334,7 @@ def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
                 "polycam_capture_unaligned" if spatial_observation_count else None
             ),
             "glb_registration": "not_registered",
+            "glb_path": glb_path,
             "fusion_distance_m": fusion_distance_m,
         },
     }

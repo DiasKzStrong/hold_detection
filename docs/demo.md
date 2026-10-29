@@ -21,17 +21,22 @@ Every inference run contains:
 - `<frame>/holds.json`: full frame-local evidence;
 
 SAM 3 runs additionally contain `<frame>/masks/` with lossless instance masks.
-The current SAM 3 prompt finds climbing holds only; separate Volume detection is
-a planned milestone and is not claimed in this demo.
+Separate repeatable prompts find climbing holds and climbing volumes; cross-prompt
+NMS removes duplicate instances.
 
 The route candidates use mask median color transformed to CIE Lab and a default
 Delta E 76 threshold of 22. They are diagnostics requiring human review, not
 measured route accuracy. `physical_holds` remains empty for ordinary photos and
 box-only runs.
 
+Color is not a unique route identifier. In the collected dataset, wall A has two
+green routes. The pipeline therefore emits color-based `route_candidates`; route
+notes or a human selection must resolve final route membership.
+
 When matching Polycam camera/depth files are present, each masked observation is
-unprojected into metric camera and capture coordinates. Nearby observations with
-the same route-color candidate are fused into `physical_holds`, providing
+unprojected into metric camera and capture coordinates. Observations with the
+same route-color candidate are fused using sampled 3D point overlap plus a
+bounded center distance. Confirmed `physical_holds` provide
 `position_3d_m`, `estimated_size_m`, and `protrusion_m`. These candidates require
 review. The scene records `glb_registration = not_registered`; it never presents
 capture coordinates as GLB coordinates without a verified transform.

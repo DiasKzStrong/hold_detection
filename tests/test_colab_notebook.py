@@ -116,6 +116,26 @@ def test_polycam_import_never_uses_depth_pngs_as_photos(tmp_path):
         prepare_inputs([archive], tmp_path / "prepared")
 
 
+def test_complete_wall_bundle_is_prepared_with_glb(tmp_path):
+    wall = tmp_path / "wallB_slab_center"
+    wall.mkdir()
+    archive = wall / "wallB_raw_data.zip"
+    with ZipFile(archive, "w") as z:
+        z.writestr("keyframes/corrected_images/123.jpg", jpeg_bytes())
+        z.writestr("keyframes/images/123.jpg", jpeg_bytes())
+        for folder in ("cameras", "corrected_cameras"):
+            z.writestr(f"keyframes/{folder}/123.json", "{}")
+        for folder in ("depth", "confidence"):
+            z.writestr(f"keyframes/{folder}/123.png", b"fixture")
+    (wall / "wallB_scan.glb").write_bytes(b"glTF fixture")
+
+    prepared = prepare_inputs([wall], tmp_path / "prepared-wall")
+    assert prepared.kind == "wall_bundle"
+    assert prepared.image_count == 1
+    assert prepared.metadata["wall_id"] == "wallB_slab_center"
+    assert Path(prepared.metadata["prepared_glb"]).is_file()
+
+
 def test_partial_polycam_and_generic_photo_zip_are_supported(tmp_path):
     partial = tmp_path / "partial.zip"
     with ZipFile(partial, "w") as z:

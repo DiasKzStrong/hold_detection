@@ -144,6 +144,15 @@ def parser():
     )
     prepare.add_argument("archive", type=Path)
     prepare.add_argument("--output", type=Path, required=True)
+    inspect_wall = commands.add_parser(
+        "inspect-wall-bundle", help="Validate one project wall folder"
+    )
+    inspect_wall.add_argument("directory", type=Path)
+    prepare_wall = commands.add_parser(
+        "prepare-wall-bundle", help="Prepare one wall's RGB-D capture and GLB"
+    )
+    prepare_wall.add_argument("directory", type=Path)
+    prepare_wall.add_argument("--output", type=Path, required=True)
     evaluate = commands.add_parser(
         "evaluate-crops", help="Evaluate the CNN on labeled crops"
     )
@@ -358,6 +367,15 @@ def main(argv=None):
                 inspect_archive(args.archive)
                 if args.command == "inspect-polycam"
                 else prepare_archive(args.archive, args.output)
+            )
+            print(json.dumps(info, indent=2))
+        elif args.command in {"inspect-wall-bundle", "prepare-wall-bundle"}:
+            from .wall_bundle import inspect_wall_bundle, prepare_wall_bundle
+
+            info = (
+                inspect_wall_bundle(args.directory)
+                if args.command == "inspect-wall-bundle"
+                else prepare_wall_bundle(args.directory, args.output)
             )
             print(json.dumps(info, indent=2))
         elif args.command == "evaluate-crops":

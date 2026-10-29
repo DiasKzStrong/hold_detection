@@ -83,8 +83,10 @@ def build_notebook():
         """, hidden=True),
         cell("markdown", "data-heading", """
             ## 2 · Data and settings
-            Upload JPEG/PNG images, a photo ZIP, or `wallA_1_raw_data.zip`. For Polycam,
-            RGB frames are selected instead of depth PNGs. Use Google Drive for larger datasets.
+            Select a complete wall folder, JPEG/PNG images, a photo ZIP, or a
+            `wall*_raw_data.zip`. A complete wall folder is preferred: it contains the raw
+            Polycam ZIP and GLB, so the notebook can retain both 3D inputs. For Polycam,
+            RGB frames are selected instead of depth PNGs.
         """),
         cell("code", "upload-inputs", """
             # @title Load photos
@@ -92,7 +94,7 @@ def build_notebook():
             from hold_detection.colab_support import prepare_inputs
 
             INPUT_MODE = 'upload'  # @param ["upload", "drive"]
-            DRIVE_INPUT = '/content/drive/MyDrive/DeMoSearch/wallA_1_raw_data.zip'  # @param {type: "string"}
+            DRIVE_INPUT = '/content/drive/MyDrive/DeMoSearch/wallA_slab_right1'  # @param {type: "string"}
             data_id = uuid.uuid4().hex[:10]
             if INPUT_MODE == 'drive':
                 drive.mount('/content/drive')
@@ -113,6 +115,9 @@ def build_notebook():
             prepared = prepare_inputs(selected, WORK / 'data' / data_id)
             SOURCE = prepared.source
             print(f'{prepared.image_count} RGB images · {prepared.kind}')
+            if prepared.metadata:
+                print('Wall:', prepared.metadata['wall_id'])
+                print('GLB:', prepared.metadata['prepared_glb'])
         """, hidden=True),
         cell("code", "settings", """
             MAX_IMAGES = 3       # @param {type: "integer"}
@@ -129,7 +134,7 @@ def build_notebook():
                 raise ValueError('Scores must be in [0, 1].')
             if CANDIDATE_FLOOR > min(YOLO_THRESHOLD, SAM_THRESHOLD):
                 raise ValueError('The candidate floor must not exceed the viewing thresholds.')
-            rotation = (90 if prepared.kind == 'polycam' else 0) if ROTATE == -1 else ROTATE
+            rotation = (90 if prepared.kind in {'polycam', 'wall_bundle'} else 0) if ROTATE == -1 else ROTATE
             experiment_id = datetime.now(timezone.utc).strftime('%Y%m%d_%H%M%S') + '_' + uuid.uuid4().hex[:6]
             EXPERIMENT = PROJECT / 'runs' / ('comparison_' + experiment_id)
             EXPERIMENT.mkdir(parents=True, exist_ok=False)
@@ -182,8 +187,8 @@ def build_notebook():
             ## 4 · SAM 3 masks and color routes
             SAM proposes masks independently from a text prompt; it does not receive YOLO boxes.
             Each run exports a route review image and draft `scene.json`. Grip classification is
-            outside the current product scope and is disabled by default. This demo prompt finds
-            climbing holds only; a separate Volume pass is not implemented yet.
+            outside the current product scope and is disabled by default. Separate repeatable
+            prompts find holds and climbing volumes, then cross-prompt NMS removes duplicates.
             With `RUN_SAM3=False` or no GPU, the full YOLO baseline remains available.
         """),
         cell("code", "sam-setup", """
@@ -247,6 +252,7 @@ def build_notebook():
             print('Physical holds:', len(scene['physical_holds']))
             print('Spatial status:', spatial['status'])
             print('GLB registration:', spatial['glb_registration'])
+            print('GLB:', spatial.get('glb_path') or 'not supplied')
             if scene['physical_holds']:
                 display(pd.DataFrame(scene['physical_holds']).head(20))
             print('Planner artifact:', scene_run / 'scene.json')
@@ -383,9 +389,9 @@ def build_notebook():
         cell("markdown", "limits", """
             ---
             **Experiment limitations.** Both models may mistake route tags for holds.
-            Current SAM inference detects holds, not Volumes. Spatial evidence requires
-            matching Polycam camera/depth files and remains in the unaligned capture frame;
-            GLB registration is not yet claimed.
+            Spatial evidence requires matching Polycam camera/depth files and remains in
+            the capture frame. The GLB is retained with the wall bundle, but registration
+            is not claimed until its transform is verified.
             Do not randomly split neighboring frames from one scan between train/test.
             Real SAM GPU inference has not been verified in the development environment;
             it runs in this Colab runtime.

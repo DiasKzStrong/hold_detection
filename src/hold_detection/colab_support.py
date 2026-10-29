@@ -15,6 +15,7 @@ class PreparedInput:
     source: Path
     kind: str
     image_count: int
+    metadata: dict | None = None
 
 
 def photo_directory(path: Path) -> tuple[Path, str]:
@@ -36,6 +37,13 @@ def prepare_inputs(paths: list[Path], workspace: Path) -> PreparedInput:
     if not paths or any(not p.exists() for p in paths):
         raise ValueError("Select existing JPEG/PNG photos, a photo directory, or a raw-data ZIP")
     if len(paths) == 1 and paths[0].is_dir():
+        wall_directory = paths[0]
+        if any("raw_data" in path.name.lower() for path in wall_directory.iterdir()):
+            from .wall_bundle import prepare_wall_bundle
+
+            manifest = prepare_wall_bundle(wall_directory, workspace)
+            source = Path(manifest["prepared_rgb_source"])
+            return PreparedInput(source, "wall_bundle", len(collect_images(source)), manifest)
         source, kind = photo_directory(paths[0])
         if source == paths[0] and any((source / name).is_dir() for name in ("depth", "confidence")):
             raise ValueError("Choose keyframes/corrected_images, not a mixed depth/RGB directory")

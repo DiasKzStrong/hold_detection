@@ -99,6 +99,26 @@ explicitly `not_registered`. See [the demo guide](docs/demo.md).
 
 Generate a gallery for an older run with `uv run holds gallery runs/<run-name>`.
 
+### Complete wall bundles
+
+The preferred input is one wall directory containing a Polycam raw-data ZIP (or
+an already extracted raw-data directory), one GLB, optional OBJ backup, route
+photos, and `route_notes.txt`. ZIP filenames do not need a `.zip` suffix.
+
+```bash
+uv run holds inspect-wall-bundle /path/to/wallC_overhang_right
+uv run holds prepare-wall-bundle /path/to/wallC_overhang_right \
+  --output /tmp/wallC-prepared
+uv run holds sam3 /tmp/wallC-prepared/capture/keyframes/corrected_images \
+  --output runs/wallC-sam3 --classifier none
+```
+
+The prepared directory retains the GLB beside `capture/`. `scene.json` records
+its path but keeps `glb_registration = not_registered` until a verified transform
+is available. Multi-view association uses sampled 3D mask points, not only 2D box
+or centroid distance. Color groups are route candidates, not guaranteed unique
+routes: the dataset contains two green routes on wall A.
+
 Grip classification is disabled by default. The old detector labels can still be
 requested explicitly for legacy experiments:
 
