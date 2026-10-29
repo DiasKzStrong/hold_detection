@@ -310,12 +310,57 @@ def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
     fusion_distance_m = 0.12
     physical_holds = _fuse_spatial_observations(scene_observations, fusion_distance_m)
     glb_candidates = set()
+    capture_roots = set()
     for _, frame in frames:
         source = Path(frame["source_image"])
         if source.parent.name in {"corrected_images", "images"}:
             capture_root = source.parent.parent.parent
+            capture_roots.add(capture_root)
             glb_candidates.update(capture_root.parent.glob("*.glb"))
     glb_path = str(next(iter(glb_candidates)).resolve()) if len(glb_candidates) == 1 else None
+    registration = None
+    if spatial_observation_count and glb_path and len(capture_roots) == 1:
+        try:
+            from .registration import (
+                load_glb_vertices, match_points_to_glb, register_capture_to_glb,
+                transform_points,
+            )
+
+            registration = register_capture_to_glb(
+                next(iter(capture_roots)), Path(glb_path)
+            )
+            if registration["status"] == "registered":
+                glb_vertices = load_glb_vertices(Path(glb_path))
+                observations_by_id = {
+                    item["observation_id"]: item for item in scene_observations
+                }
+                matrix = np.asarray(
+                    registration["capture_to_glb_matrix_row_major"], dtype=float
+                )
+                for physical_hold in physical_holds:
+                    position = np.asarray(physical_hold["position_3d_m"], dtype=float)
+                    physical_hold["position_glb_m"] = transform_points(
+                        position[None, :], registration
+                    )[0].round(6).tolist()
+                    normal = physical_hold.get("surface_normal")
+                    physical_hold["surface_normal_glb"] = (
+                        (np.asarray(normal) @ matrix[:3, :3].T).round(6).tolist()
+                        if normal is not None else None
+                    )
+                    samples = []
+                    for observation_id in physical_hold["observation_ids"]:
+                        evidence = observations_by_id[observation_id]["spatial_evidence"]
+                        samples.extend(evidence.get("point_samples_capture_m", []))
+                    physical_hold["glb_match"] = match_points_to_glb(
+                        np.asarray(samples, dtype=float), Path(glb_path), registration,
+                        glb_vertices,
+                    )
+                    physical_hold["needs_review"] |= physical_hold["glb_match"]["needs_review"]
+        except (OSError, RuntimeError, ValueError) as error:
+            registration = {
+                "status": "failed", "error": str(error),
+                "method": "pca_initialized_trimmed_point_to_point_icp",
+            }
 
     scene = {
         "schema_version": "2.0-draft",
@@ -333,7 +378,10 @@ def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
             "coordinate_frame": (
                 "polycam_capture_unaligned" if spatial_observation_count else None
             ),
-            "glb_registration": "not_registered",
+            "glb_registration": (
+                registration["status"] if registration else "not_registered"
+            ),
+            "glb_registration_details": registration,
             "glb_path": glb_path,
             "fusion_distance_m": fusion_distance_m,
         },

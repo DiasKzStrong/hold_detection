@@ -94,8 +94,10 @@ individual `crops/`. Segmentation runs additionally export lossless masks.
 `scene.json` is the future planner interface. Its `physical_holds` list remains
 empty for ordinary photos. For a prepared Polycam capture and instance masks, it
 contains multi-view RGB-D hold candidates with metric position, size, and
-protrusion in the unaligned capture coordinate frame. GLB registration remains
-explicitly `not_registered`. See [the demo guide](docs/demo.md).
+protrusion in the capture coordinate frame. With a complete wall bundle, a
+quality-gated registration stage also attempts to match those holds to the GLB;
+the status is explicitly `registered`, `rejected`, `failed`, or `not_registered`.
+See [the demo guide](docs/demo.md).
 
 Generate a gallery for an older run with `uv run holds gallery runs/<run-name>`.
 
@@ -113,11 +115,14 @@ uv run holds sam3 /tmp/wallC-prepared/capture/keyframes/corrected_images \
   --output runs/wallC-sam3 --classifier none
 ```
 
-The prepared directory retains the GLB beside `capture/`. `scene.json` records
-its path but keeps `glb_registration = not_registered` until a verified transform
-is available. Multi-view association uses sampled 3D mask points, not only 2D box
-or centroid distance. Color groups are route candidates, not guaranteed unique
-routes: the dataset contains two green routes on wall A.
+The prepared directory retains the GLB beside `capture/`. When physical holds are
+available, the scene builder estimates a rigid capture-to-GLB transform using
+PCA-initialized trimmed ICP, reports its residual and inlier ratios, and rejects
+weak registration. Accepted matches add GLB position, normal, nearest mesh anchor,
+and point-to-mesh distance to every physical hold. Multi-view association uses
+sampled 3D mask points, not only 2D box or centroid distance. Color groups are
+route candidates, not guaranteed unique routes: the dataset contains two green
+routes on wall A.
 
 Grip classification is disabled by default. The old detector labels can still be
 requested explicitly for legacy experiments:

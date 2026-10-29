@@ -38,8 +38,10 @@ unprojected into metric camera and capture coordinates. Observations with the
 same route-color candidate are fused using sampled 3D point overlap plus a
 bounded center distance. Confirmed `physical_holds` provide
 `position_3d_m`, `estimated_size_m`, and `protrusion_m`. These candidates require
-review. The scene records `glb_registration = not_registered`; it never presents
-capture coordinates as GLB coordinates without a verified transform.
+review. If the matching GLB is present, PCA-initialized trimmed ICP estimates a
+rigid capture-to-mesh transform. The scene exposes its RMSE and 5/10 cm inlier
+ratios and only exports `position_glb_m` plus `glb_match` after the quality gate
+passes. Rejected registration never produces GLB coordinates.
 
 When masks are unavailable, the YOLO fallback estimates color from each bounding
 box and records `bbox_median_rgb_fallback`. This is presentation-safe but less

@@ -252,6 +252,11 @@ def build_notebook():
             print('Physical holds:', len(scene['physical_holds']))
             print('Spatial status:', spatial['status'])
             print('GLB registration:', spatial['glb_registration'])
+            details = spatial.get('glb_registration_details') or {}
+            if details:
+                print('Registration quality:', details.get('quality', 'n/a'))
+                print('Trimmed RMSE (m):', details.get('trimmed_rmse_m', 'n/a'))
+                print('10 cm inlier fraction:', details.get('inlier_fraction_10cm', 'n/a'))
             print('GLB:', spatial.get('glb_path') or 'not supplied')
             if scene['physical_holds']:
                 display(pd.DataFrame(scene['physical_holds']).head(20))
@@ -390,8 +395,8 @@ def build_notebook():
             ---
             **Experiment limitations.** Both models may mistake route tags for holds.
             Spatial evidence requires matching Polycam camera/depth files and remains in
-            the capture frame. The GLB is retained with the wall bundle, but registration
-            is not claimed until its transform is verified.
+            the capture frame. GLB registration is quality-gated; rejected or low-quality
+            alignment must be reviewed rather than treated as ground truth.
             Do not randomly split neighboring frames from one scan between train/test.
             Real SAM GPU inference has not been verified in the development environment;
             it runs in this Colab runtime.

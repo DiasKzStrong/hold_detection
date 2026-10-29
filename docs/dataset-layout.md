@@ -29,6 +29,12 @@ depth, confidence, camera intrinsics, and camera poses. The GLB is retained as
 the wall mesh. Route photos supply a cleaner overview and route selection but do
 not carry the raw capture camera calibration.
 
+Registration does not require labeled holds or model training. A robust rigid ICP
+stage aligns the raw RGB-D cloud to GLB vertices, records quantitative residuals,
+and rejects the transform when fewer than 20% of sampled capture points are within
+10 cm or trimmed RMSE exceeds 8 cm. Accepted registration remains reviewable;
+these thresholds are engineering gates, not measured accuracy guarantees.
+
 Route notes are weak supervision, not per-hold ground truth. In particular, wall
 A contains two green V3 routes with opposite directions. Consequently, color
 clustering proposes route candidates but cannot assign final route identity by
