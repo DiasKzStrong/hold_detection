@@ -98,9 +98,12 @@ def test_pipeline_exports_real_mask_pixels_crops_rotation_and_schema(tmp_path):
 def test_pipeline_groups_mask_colors_into_routes_and_exports_scene(tmp_path):
     source = tmp_path / "wall.png"
     pixels = np.zeros((12, 30, 3), dtype=np.uint8)
-    pixels[:, :10] = (210, 35, 35)
-    pixels[:, 10:20] = (190, 45, 45)
-    pixels[:, 20:] = (30, 80, 220)
+    # Adjacent grayscale values are within the threshold, while the endpoints
+    # are not. Reversing detection order would change greedy membership unless
+    # observations are normalized into a deterministic order first.
+    pixels[:, :10] = (80, 80, 80)
+    pixels[:, 10:20] = (130, 130, 130)
+    pixels[:, 20:] = (180, 180, 180)
     Image.fromarray(pixels).save(source)
     detections = [
         Detection((0, 0, 10, 12), 0.9, "jug"),

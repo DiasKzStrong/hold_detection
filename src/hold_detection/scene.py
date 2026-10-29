@@ -36,7 +36,7 @@ def rgb_to_lab(rgb: list[int]) -> list[float]:
 
 
 @dataclass
-class _RouteCluster:
+class _ColorCluster:
     members: list[dict] = field(default_factory=list)
     center: np.ndarray | None = None
 
@@ -46,14 +46,15 @@ class _RouteCluster:
         self.center = np.median(values, axis=0)
 
 
-def _cluster_route_candidates(observations: list[dict], threshold: float) -> list[_RouteCluster]:
-    clusters: list[_RouteCluster] = []
-    for observation in observations:
+def _cluster_route_candidates(observations: list[dict], threshold: float) -> list[_ColorCluster]:
+    clusters: list[_ColorCluster] = []
+    ordered = sorted(observations, key=lambda item: tuple(item["color_lab"]))
+    for observation in ordered:
         value = np.asarray(observation["color_lab"])
         distances = [float(np.linalg.norm(value - cluster.center)) for cluster in clusters]
         nearest = int(np.argmin(distances)) if distances else None
         if nearest is None or distances[nearest] > threshold:
-            cluster = _RouteCluster()
+            cluster = _ColorCluster()
             cluster.add(observation)
             clusters.append(cluster)
         else:
