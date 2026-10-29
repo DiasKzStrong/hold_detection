@@ -170,7 +170,7 @@ def parser():
         "--weights", type=Path, default=Path("models/climbing-yolo11s.pt")
     )
     predict.add_argument(
-        "--classifier", choices=("detector", "cnn", "trained"), default="detector"
+        "--classifier", choices=("none", "detector", "cnn", "trained"), default="none"
     )
     predict.add_argument(
         "--classifier-weights", type=Path, default=Path("models/climbing-cnn.pth")
@@ -202,7 +202,14 @@ def parser():
     sam.add_argument("source", type=Path)
     sam.add_argument("--output", type=Path, required=True)
     sam.add_argument("--weights", type=Path, default=Path("models/sam3/sam3.pt"))
-    sam.add_argument("--prompt", default="climbing hold")
+    sam.add_argument(
+        "--prompt", action="append",
+        help="Repeatable hold prompt; defaults target holds, grips, and footholds",
+    )
+    sam.add_argument(
+        "--volume-prompt", action="append",
+        help="Repeatable Volume prompt; defaults to 'climbing volume'",
+    )
     sam.add_argument("--classifier", choices=("none", "cnn", "trained"), default="none")
     sam.add_argument(
         "--classifier-weights", type=Path, default=Path("models/climbing-cnn.pth")
@@ -389,9 +396,13 @@ def main(argv=None):
             if args.command == "sam3":
                 from .sam3_backend import Sam3Detector
 
-                detector = Sam3Detector(
-                    args.weights, args.prompt, args.device, args.threads
-                )
+                hold_prompts = args.prompt or [
+                    "climbing hold", "climbing grip", "climbing foothold",
+                ]
+                volume_prompts = args.volume_prompt or ["climbing volume"]
+                prompts = ([('hold', prompt) for prompt in hold_prompts]
+                           + [('volume', prompt) for prompt in volume_prompts])
+                detector = Sam3Detector(args.weights, prompts, args.device, args.threads)
                 segmenter = detector
             else:
                 detector = HoldDetector(args.weights, args.device, args.threads)
@@ -421,7 +432,7 @@ def main(argv=None):
                 metadata["detector"].update(
                     {
                         "method": "sam3_text_prompt",
-                        "prompt": args.prompt,
+                        "prompts": prompts,
                         "source_revision": SAM3_SOURCE_REVISION,
                     }
                 )
@@ -454,6 +465,7 @@ def main(argv=None):
                 rotate=args.rotate,
                 limit=args.limit,
                 model_metadata=metadata,
+                infer_grip_types=args.classifier != "none",
             )
             print(f"Saved {summary['frame_count']} frames to {args.output}")
             print(f"View results: {args.output / 'index.html'}")

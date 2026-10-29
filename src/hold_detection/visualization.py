@@ -92,9 +92,10 @@ def plot_crop_grid(run_path, frame_id=None, threshold=0, maximum=18):
     for ax, hold in zip(axes.flat, holds):
         with Image.open(Path(frame["directory"]) / hold["crop_path"]) as crop:
             ax.imshow(crop.copy())
-        label = hold["grip_type"] or hold["object_kind"]
-        score = "—" if hold["type_score"] is None else f"{hold['type_score']:.2f}"
-        ax.set_title(f"{hold['hold_id']} · {label}\ndet {hold['detector_score']:.2f} · type {score}",
+        label = hold["object_kind"]
+        mask_score = hold.get("segmentation_score")
+        mask_text = "—" if mask_score is None else f"{mask_score:.2f}"
+        ax.set_title(f"{hold['hold_id']} · {label}\ndet {hold['detector_score']:.2f} · mask {mask_text}",
                      fontsize=9, color="#b45309" if hold["needs_review"] else "#334155")
     if not holds:
         axes[0, 0].text(0.5, 0.5, "No candidates at this threshold", ha="center")

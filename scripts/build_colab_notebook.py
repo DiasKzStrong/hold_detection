@@ -118,20 +118,14 @@ def build_notebook():
             MAX_IMAGES = 3       # @param {type: "integer"}
             ROTATE = -1          # @param {type: "integer"}
             RUN_SAM3 = True      # @param {type: "boolean"}
-            PROMPT = 'climbing hold'  # @param {type: "string"}
+            HOLD_PROMPTS = 'climbing hold, climbing grip, climbing foothold'  # @param {type: "string"}
+            VOLUME_PROMPTS = 'climbing volume'  # @param {type: "string"}
             CANDIDATE_FLOOR = 0.05    # @param {type: "number"}
             YOLO_THRESHOLD = 0.35    # @param {type: "number"}
             SAM_THRESHOLD = 0.50     # @param {type: "number"}
-            MIN_TYPE_SCORE = 0.50    # @param {type: "number"}
-            CLASSIFIER = 'none'  # @param ["none", "cnn", "trained"]
-            CLASSIFIER_WEIGHTS = ''  # @param {type: "string"}
-
-            if CLASSIFIER == 'trained' and not Path(CLASSIFIER_WEIGHTS).is_file():
-                raise ValueError('Set CLASSIFIER_WEIGHTS to your trained ResNet18/SigLIP best.pt artifact.')
-
             if MAX_IMAGES < 0 or ROTATE not in (-1, 0, 90, 180, 270):
                 raise ValueError('MAX_IMAGES must be >= 0; ROTATE must be -1, 0, 90, 180 or 270.')
-            if not all(0 <= v <= 1 for v in [CANDIDATE_FLOOR, YOLO_THRESHOLD, SAM_THRESHOLD, MIN_TYPE_SCORE]):
+            if not all(0 <= v <= 1 for v in [CANDIDATE_FLOOR, YOLO_THRESHOLD, SAM_THRESHOLD]):
                 raise ValueError('Scores must be in [0, 1].')
             if CANDIDATE_FLOOR > min(YOLO_THRESHOLD, SAM_THRESHOLD):
                 raise ValueError('The candidate floor must not exceed the viewing thresholds.')
@@ -166,7 +160,8 @@ def build_notebook():
         """),
         cell("markdown", "baseline-heading", """
             ## 3 · YOLO11s baseline
-            Detection and hold types come from one model. This section does not require HF_TOKEN.
+            The legacy YOLO checkpoint supplies fast hold proposals. Its grip-type head is ignored.
+            This section does not require HF_TOKEN.
             Model latency is measured separately from image export; weight loading is excluded,
             and the first frame includes warmup. GPU timers are synchronized.
         """),
@@ -175,7 +170,7 @@ def build_notebook():
             run_holds('fetch-models', log_name='fetch_yolo')
             yolo_path = EXPERIMENT / ('yolo_' + uuid.uuid4().hex[:6])
             args = ['predict', SOURCE, '--output', yolo_path, '--rotate', rotation,
-                    '--conf', CANDIDATE_FLOOR, '--min-type-score', MIN_TYPE_SCORE, '--max-det', 500]
+                    '--conf', CANDIDATE_FLOOR, '--classifier', 'none', '--max-det', 500]
             if MAX_IMAGES: args += ['--limit', MAX_IMAGES]
             run_holds(*args, log_name='yolo_inference')
             RUNS['YOLO11s'] = yolo_path
@@ -190,9 +185,6 @@ def build_notebook():
             outside the current product scope and is disabled by default. This demo prompt finds
             climbing holds only; a separate Volume pass is not implemented yet.
             With `RUN_SAM3=False` or no GPU, the full YOLO baseline remains available.
-            For a trained ResNet18/SigLIP, set `CLASSIFIER='trained'` and provide `best.pt`.
-            Use [the training notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Classifier_Training.ipynb)
-            or the NYU SLURM jobs to produce that artifact.
         """),
         cell("code", "sam-setup", """
             # @title Set up SAM 3 and checkpoint access
@@ -210,7 +202,7 @@ def build_notebook():
                         if not token: raise ValueError('A token for an account with approved access to facebook/sam3 is required.')
                         os.environ['HF_TOKEN'] = token
                         del token
-                    PYTHON = prepare_runtime(WORK, PROJECT, sam3=True, training=CLASSIFIER == 'trained')
+                    PYTHON = prepare_runtime(WORK, PROJECT, sam3=True, training=False)
                     run_holds('fetch-sam3', log_name='fetch_sam3')
                     SAM_READY = True
                     print('SAM 3 ready. Token value is not displayed or saved.')
@@ -226,11 +218,14 @@ def build_notebook():
             if SAM_READY:
                 sam_path = EXPERIMENT / ('sam3_' + uuid.uuid4().hex[:6])
                 args = ['sam3', SOURCE, '--output', sam_path, '--rotate', rotation,
-                        '--prompt', PROMPT, '--conf', CANDIDATE_FLOOR, '--max-det', 500,
-                        '--classifier', CLASSIFIER, '--min-type-score', MIN_TYPE_SCORE]
-                if CLASSIFIER == 'trained': args += ['--classifier-weights', CLASSIFIER_WEIGHTS]
+                        '--conf', CANDIDATE_FLOOR, '--max-det', 500,
+                        '--classifier', 'none']
+                for prompt in [item.strip() for item in HOLD_PROMPTS.split(',') if item.strip()]:
+                    args += ['--prompt', prompt]
+                for prompt in [item.strip() for item in VOLUME_PROMPTS.split(',') if item.strip()]:
+                    args += ['--volume-prompt', prompt]
                 if MAX_IMAGES: args += ['--limit', MAX_IMAGES]
-                print('Running SAM 3 segmentation +', CLASSIFIER, '…')
+                print('Running class-agnostic SAM 3 hold segmentation…')
                 try:
                     run_holds(*args, log_name='sam3_inference')
                     RUNS['SAM 3'] = sam_path
@@ -242,10 +237,25 @@ def build_notebook():
                     if 'cuda' in str(error).lower() and 'out of memory' in str(error).lower():
                         print('For CUDA out-of-memory errors, try a larger GPU.')
         """),
+        cell("code", "scene-summary", """
+            # @title Inspect route candidates and spatial output
+            import pandas as pd
+            scene_run = RUNS.get('SAM 3', RUNS['YOLO11s'])
+            scene = json.loads((scene_run / 'scene.json').read_text())
+            spatial = scene['reconstruction']
+            print('Route candidates:', len(scene['route_candidates']))
+            print('Physical holds:', len(scene['physical_holds']))
+            print('Spatial status:', spatial['status'])
+            print('GLB registration:', spatial['glb_registration'])
+            if scene['physical_holds']:
+                display(pd.DataFrame(scene['physical_holds']).head(20))
+            print('Planner artifact:', scene_run / 'scene.json')
+            display(HTML(f'<a href="{scene_run / "index.html"}" target="_blank">Open offline review gallery</a>'))
+        """),
         cell("markdown", "viewer-heading", """
             ## 5 · Frame-by-frame comparison
             Select a frame, adjust thresholds, and toggle masks/boxes. ID labels are off
-            by default to avoid obscuring holds. Inspect types and scores in the crops below.
+            by default to avoid obscuring holds. Inspect masks and scores in the crops below.
         """),
         cell("code", "viewer", """
             from google.colab import output
@@ -279,8 +289,8 @@ def build_notebook():
             Annotate all visible holds/volumes on evaluated frames; partial annotations
             produce spurious false positives. Image filenames must match the uploaded photos.
 
-            The `hold` category enables detection metrics; `crimp/jug/pinch/pocket/sloper/volume`
-            also enable type metrics. Polygon masks or COCO RLE are required for mask AP.
+            A `hold` category enables class-agnostic detection metrics. Polygon masks or
+            COCO RLE are required for mask AP.
             The YOLO baseline has no masks: its mask AP is **N/A**, not 0.
 
             `source` uses annotations in original-image pixels; rotation is applied automatically.
@@ -312,13 +322,12 @@ def build_notebook():
             selected thresholds. Matching is class-agnostic, one-to-one, IoU ≥ 0.50, maxDets=500.
             AP50–95 uses the COCO IoU grid, but the limit of 500 differs from the standard 100.
 
-            Type accuracy/F1 are computed on matched GT; coverage and the fraction of all
-            typed GT that are both detected **and** correctly classified are shown separately.
-            This prevents high conditional accuracy from hiding missed holds.
+            Detection recall is the primary signal: missing a hold prevents every downstream
+            route and spatial calculation for that object.
         """),
         cell("code", "metrics", """
             import pandas as pd
-            from hold_detection.visualization import metric_rows, plot_diagnostics, plot_quality, plot_type_confusions
+            from hold_detection.visualization import metric_rows, plot_diagnostics, plot_quality
 
             REPORT_DIR = EXPERIMENT / ('report_' + uuid.uuid4().hex[:6])
             args = ['benchmark', '--output', REPORT_DIR, '--gt-coordinates', GT_COORDINATES, '--max-det', 500]
@@ -337,9 +346,6 @@ def build_notebook():
             if GT_FILE:
                 show_table(['Model', 'Precision', 'Recall', 'F1', 'Box AP50', 'Box AP50–95', 'Mask AP50–95', 'Mask IoU · matched'])
                 display(plot_quality(report)); plt.close('all')
-                show_table(['Model', 'Type acc · matched', 'Type macro-F1 · matched', 'Type coverage', 'Correct type recall · all GT'])
-                confusion = plot_type_confusions(report)
-                if confusion is not None: display(confusion); plt.close(confusion)
             else:
                 display(HTML('<p style="padding:14px;background:#f1f5f9;border-radius:8px">'
                              'Quality metrics unavailable. Upload COCO ground truth in section 6, then rerun section 7.</p>'))
@@ -350,7 +356,7 @@ def build_notebook():
                 evaluated_thresholds = {row['model']: row['threshold'] for row in report['models']}
                 display(plot_comparison(RUNS, viewer.frame.value, evaluated_thresholds, quality=quality))
                 plt.close('all')
-                print('Green = TP · red = FP · dashed orange = missed GT. Types are evaluated separately.')
+                print('Green = TP · red = FP · dashed orange = missed GT.')
         """),
         cell("markdown", "export-heading", """
             ## 8 · Download the experiment
@@ -376,9 +382,10 @@ def build_notebook():
         """),
         cell("markdown", "limits", """
             ---
-            **Experiment limitations.** The CNN is a baseline: 69/100 correct on the
-            upstream author's sample crops, not on our gym. Grip type may not be visible
-            from a particular viewpoint. Both models may mistake route tags for holds.
+            **Experiment limitations.** Both models may mistake route tags for holds.
+            Current SAM inference detects holds, not Volumes. Spatial evidence requires
+            matching Polycam camera/depth files and remains in the unaligned capture frame;
+            GLB registration is not yet claimed.
             Do not randomly split neighboring frames from one scan between train/test.
             Real SAM GPU inference has not been verified in the development environment;
             it runs in this Colab runtime.

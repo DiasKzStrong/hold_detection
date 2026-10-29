@@ -44,7 +44,8 @@ def make_run(tmp_path, name="model", detections=None, masks=False, rotation=0):
     output = tmp_path / name
     run_inference(image, output, Detector(detections), segmenter=Segmenter() if masks else None,
                   rotate=rotation, confidence=0.05,
-                  model_metadata={"classifier": "detector", "device": "cpu"})
+                  model_metadata={"classifier": "detector", "device": "cpu"},
+                  infer_grip_types=True)
     return output
 
 

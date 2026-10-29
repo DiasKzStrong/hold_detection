@@ -60,17 +60,21 @@ def test_sam3_mixed_precision_outputs_convert_to_numpy_without_losing_alignment(
 
 @pytest.mark.parametrize("dtype", [torch.float32, torch.bfloat16])
 def test_sam3_adapter_consumes_official_processor_outputs_and_rejects_stale_masks(tmp_path, dtype):
+    prompts_seen = []
+
     class Processor:
         def set_image(self, image):
             assert image.size == (30, 20)
             return {"image_set": True}
 
         def set_text_prompt(self, prompt, state):
-            assert state["image_set"] and prompt == "climbing hold"
+            assert state["image_set"]
+            prompts_seen.append(prompt)
             return {name: tensor.to(dtype) for name, tensor in predictions().items()}
 
     detector = Sam3Detector.__new__(Sam3Detector)
-    detector.device, detector.prompt = "cpu", "climbing hold"
+    detector.device = "cpu"
+    detector.prompts = [("hold", "climbing hold"), ("hold", "climbing foothold")]
     detector.processor = Processor()
     detector._detections, detector._masks = None, None
     with pytest.raises(ValueError, match="corresponding"):
@@ -80,13 +84,15 @@ def test_sam3_adapter_consumes_official_processor_outputs_and_rejects_stale_mask
     output = tmp_path / "run"
     summary = run_inference(source, output, detector, segmenter=detector)
     assert summary["segmentation_enabled"] and summary["detection_count"] == 2
+    assert prompts_seen == ["climbing hold", "climbing foothold"]
     frame_path = next(output.glob("*/holds.json"))
     frame = json.loads(frame_path.read_text())
     assert frame["holds"][0]["segmentation_method"] == "sam3_text_prompt"
     assert frame["holds"][0]["segmentation_score_method"] == "concept_presence_times_instance_score"
     assert all(h["type_score"] is None for h in frame["holds"])
     html = (output / "index.html").read_text()
-    assert "mask PNG" in html and "type not inferred" in html
+    assert "mask PNG" in html and "detection score" in html
+    assert "type not inferred" not in html
     assert "scene.json" in html and "Route review" in html
     assert "route_candidate_0001" in html
 
@@ -128,7 +134,7 @@ def test_sam3_fails_clearly_without_cuda_before_creating_output(tmp_path, monkey
     assert "requires an NVIDIA CUDA GPU" in capsys.readouterr().err
     assert not (tmp_path / "run").exists()
     args = parser().parse_args(["sam3", str(image), "--output", "run"])
-    assert args.prompt == "climbing hold" and args.classifier == "none"
+    assert args.prompt is None and args.volume_prompt is None and args.classifier == "none"
 
 
 def test_gallery_escapes_labels_and_rejects_external_assets_and_user_files(tmp_path):

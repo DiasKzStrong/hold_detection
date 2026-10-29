@@ -32,8 +32,10 @@ def validate_image_source(source: Path):
 
 
 def make_hold_record(detection, index, scores, minimum_score, mask_info=None,
-                     mask_method="sam2_box_prompt"):
-    if scores is None and not detection.label_is_type:
+                     mask_method="sam2_box_prompt", infer_grip_types=True):
+    if not infer_grip_types:
+        label, score, method, alternatives = None, None, "disabled", None
+    elif scores is None and not detection.label_is_type:
         label, score, method, alternatives = "unknown", None, "not_inferred", None
     elif scores is None:
         label, score = detection.label, detection.score
@@ -44,8 +46,9 @@ def make_hold_record(detection, index, scores, minimum_score, mask_info=None,
         score = scores[label]
         method = "crop_cnn_softmax"
         alternatives = scores
-    unknown = score is None or score < minimum_score
-    disagreement = scores is not None and detection.label_is_type and label != detection.label
+    unknown = infer_grip_types and (score is None or score < minimum_score)
+    disagreement = (infer_grip_types and scores is not None
+                    and detection.label_is_type and label != detection.label)
     mask, mask_score = mask_info if mask_info is not None else (None, None)
     empty_mask = mask is not None and not mask.any()
     return {
@@ -54,14 +57,19 @@ def make_hold_record(detection, index, scores, minimum_score, mask_info=None,
                            (detection.bbox[1] + detection.bbox[3]) / 2],
         "detector_label": detection.label, "detector_score": detection.score,
         "predicted_type": label,
-        "object_kind": (detection.label if not detection.label_is_type
+        "object_kind": ("volume" if detection.label == "volume" else "hold"
+                        if not infer_grip_types else
+                        detection.label if not detection.label_is_type
                         and scores is None and detection.label in {"hold", "volume"}
                         else "unknown" if unknown else "volume" if label == "volume" else "hold"),
-        "grip_type": "unknown" if unknown else (None if label == "volume" else label),
+        "grip_type": (None if not infer_grip_types else
+                      "unknown" if unknown else (None if label == "volume" else label)),
         "type_score": score, "type_score_method": method, "type_scores": alternatives,
         "scores_calibrated": False,
         "needs_review": unknown or empty_mask or disagreement,
-        "review_reasons": (["type_not_inferred"] if score is None else ["low_type_score"] if unknown else [])
+        "review_reasons": (([] if not infer_grip_types else
+                            ["type_not_inferred"] if score is None else
+                            ["low_type_score"] if unknown else []))
         + (["empty_mask"] if empty_mask else [])
         + (["classifier_detector_disagreement"] if disagreement else []),
         "mask_path": None, "segmentation_score": mask_score,
@@ -73,7 +81,7 @@ def make_hold_record(detection, index, scores, minimum_score, mask_info=None,
 def run_inference(source: Path, output: Path, detector, classifier=None, segmenter=None,
                   confidence=0.35, minimum_type_score=0.5, iou=0.5, imgsz=1024,
                   tile_size=0, overlap=0.25, max_det=500, rotate=0, limit=None,
-                  model_metadata=None) -> dict:
+                  model_metadata=None, infer_grip_types=False) -> dict:
     validate_image_source(source)
     if source.is_dir() and output.resolve().is_relative_to(source.resolve()):
         raise ValueError("Output must be outside the input image directory")
@@ -124,7 +132,8 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
         records = []
         for index, (detection, scores, mask_info) in enumerate(zip(detections, predictions, masks), 1):
             record = make_hold_record(detection, index, scores, minimum_type_score, mask_info,
-                                      getattr(segmenter, "method", "sam2_box_prompt"))
+                                      getattr(segmenter, "method", "sam2_box_prompt"),
+                                      infer_grip_types=infer_grip_types)
             if scores is not None and getattr(classifier, "score_method", None):
                 record["type_score_method"] = classifier.score_method
             if mask_info is not None:
@@ -137,7 +146,11 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
                 mask_path = Path("masks") / f"{record['hold_id']}.png"
                 Image.fromarray(mask.astype(np.uint8) * 255).save(frame_dir / mask_path)
                 record["mask_path"] = mask_path.as_posix()
-                overlay = Image.new("RGB", image.size, COLORS.get(record["predicted_type"], "#b0b0b0"))
+                overlay_color = (
+                    COLORS.get(record["predicted_type"], "#b0b0b0")
+                    if infer_grip_types else "#3b82f6"
+                )
+                overlay = Image.new("RGB", image.size, overlay_color)
                 alpha = Image.fromarray(mask.astype(np.uint8) * 65)
                 annotation = Image.composite(overlay, annotation, alpha)
                 pixels = np.asarray(image)[mask]
@@ -150,12 +163,13 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
             records.append(record)
         draw = ImageDraw.Draw(annotation)
         for record in records:
-            color = COLORS.get(record["predicted_type"], "#b0b0b0")
+            color = (COLORS.get(record["predicted_type"], "#b0b0b0")
+                     if infer_grip_types else "#3b82f6")
             draw.rectangle(record["bbox_xyxy"], outline=color, width=3)
             x, y = record["bbox_xyxy"][:2]
             label = record["grip_type"] or record["object_kind"]
-            score_text = (f"{record['type_score']:.2f}" if record["type_score"] is not None
-                          else f"SAM {record['detector_score']:.2f}")
+            score_text = (f"type {record['type_score']:.2f}" if record["type_score"] is not None
+                          else f"det {record['detector_score']:.2f}")
             text = f"{record['hold_id']} {label} {score_text}"
             bounds = draw.textbbox((x, max(0, y - 13)), text)
             draw.rectangle(bounds, fill="black")
@@ -177,7 +191,7 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
         (frame_dir / "holds.json").write_text(json.dumps(frame, indent=2, allow_nan=False) + "\n")
         counts = dict(Counter(r["grip_type"] or r["object_kind"] for r in records))
         frames.append({"frame_id": frame_id, "source_image": str(path),
-                       "hold_count": len(records), "types": counts,
+                       "hold_count": len(records), "objects": counts,
                        "needs_review": sum(r["needs_review"] for r in records)})
         print(f"{path.name}: {len(records)} detections; {counts}", flush=True)
     summary = {
@@ -188,9 +202,10 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
                      "crop_padding": getattr(classifier, "metadata", {}).get("crop_padding", 0.1)},
         "frame_count": len(frames), "detection_count": sum(f["hold_count"] for f in frames),
         "segmentation_enabled": segmenter is not None,
+        "grip_type_inference_enabled": infer_grip_types,
         "timing_protocol": "CUDA synchronized; model loading excluded; first-image warmup included; frame elapsed includes image/crop export",
         "elapsed_seconds": round(time.monotonic() - started, 3), "frames": frames,
-        "evaluation": "Unlabeled inference; detection/type accuracy has not been measured.",
+        "evaluation": "Unlabeled inference; hold recall, mask quality and route accuracy have not been measured.",
     }
     (output / "summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
     from .scene import build_scene

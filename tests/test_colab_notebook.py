@@ -81,9 +81,10 @@ def test_sam_failure_suggests_larger_gpu_only_for_cuda_oom(tmp_path, capsys, err
         raise RuntimeError(error_message)
     source = next(c.source for c in load_notebook().cells if c.id == "sam3-run")
     namespace = {"RUNS": {}, "THRESHOLDS": {}, "SAM_READY": True, "EXPERIMENT": tmp_path,
-                 "uuid": uuid, "SOURCE": tmp_path, "rotation": 0, "PROMPT": "climbing hold",
-                 "CANDIDATE_FLOOR": 0.05, "MIN_TYPE_SCORE": 0.5, "MAX_IMAGES": 1,
-                 "run_holds": fail, "CLASSIFIER": "cnn"}
+                 "uuid": uuid, "SOURCE": tmp_path, "rotation": 0,
+                 "HOLD_PROMPTS": "climbing hold, climbing foothold",
+                 "VOLUME_PROMPTS": "climbing volume",
+                 "CANDIDATE_FLOOR": 0.05, "MAX_IMAGES": 1, "run_holds": fail}
     exec(compile(source, "sam3-run", "exec"), namespace)
     output = capsys.readouterr().out
     assert error_message in output

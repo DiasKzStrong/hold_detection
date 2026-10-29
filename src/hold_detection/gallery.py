@@ -36,9 +36,8 @@ def build_gallery(run: Path) -> Path:
         )
         details = []
         for hold in frame["holds"]:
-            label = hold["grip_type"] or hold["object_kind"]
-            score = hold["type_score"]
-            score_text = f"type score {score:.2f}" if score is not None else "type not inferred"
+            label = hold["object_kind"]
+            score_text = f'detection score {hold["detector_score"]:.2f}'
             reasons = ", ".join(hold["review_reasons"])
             review = " · REVIEW: " + reasons if reasons else ""
             crop = asset_url(run, frame_path.parent, hold["crop_path"])
@@ -66,7 +65,7 @@ def build_gallery(run: Path) -> Path:
             + '<h3>Detection review</h3>'
             + f'<a href="{annotation}"><img class="wall" loading="lazy" '
             f'src="{annotation}" alt="Annotated wall"></a>'
-            f'<details><summary>Show crops, types and masks</summary><div class="crops">'
+            f'<details><summary>Show observation evidence</summary><div class="crops">'
             + "".join(details) + '</div></details></section>'
         )
     html = SIGNATURE + """<!doctype html>

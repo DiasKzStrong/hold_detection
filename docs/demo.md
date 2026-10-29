@@ -1,14 +1,15 @@
 # Route perception demo
 
-The demo is an offline-first vertical slice from wall photographs to reviewable
-route candidates. It does not claim multi-view identity or 3D reconstruction.
+The demo is an offline-first vertical slice from a wall capture to reviewable
+route candidates and metric RGB-D spatial evidence. It does not claim that the
+capture coordinate frame is registered to the GLB.
 
 ## Colab run
 
 1. Open `notebooks/DeMoSearch_SAM3_Colab.ipynb` in a GPU runtime.
 2. Add an approved Hugging Face read token as the `HF_TOKEN` Colab secret.
 3. Select `drive` input and point `DRIVE_INPUT` at a photo directory or ZIP.
-4. Keep `CLASSIFIER = 'none'`; grip classification is outside the current scope.
+4. Leave grip classification disabled; the notebook no longer exposes it in the main flow.
 5. Run YOLO first, then SAM 3. Start with three images.
 6. Download the offline report before presenting.
 
@@ -25,8 +26,15 @@ a planned milestone and is not claimed in this demo.
 
 The route candidates use mask median color transformed to CIE Lab and a default
 Delta E 76 threshold of 22. They are diagnostics requiring human review, not
-measured route accuracy. `physical_holds` remains empty and reconstruction status
-is `not_run` until multi-view fusion is implemented.
+measured route accuracy. `physical_holds` remains empty for ordinary photos and
+box-only runs.
+
+When matching Polycam camera/depth files are present, each masked observation is
+unprojected into metric camera and capture coordinates. Nearby observations with
+the same route-color candidate are fused into `physical_holds`, providing
+`position_3d_m`, `estimated_size_m`, and `protrusion_m`. These candidates require
+review. The scene records `glb_registration = not_registered`; it never presents
+capture coordinates as GLB coordinates without a verified transform.
 
 When masks are unavailable, the YOLO fallback estimates color from each bounding
 box and records `bbox_median_rgb_fallback`. This is presentation-safe but less

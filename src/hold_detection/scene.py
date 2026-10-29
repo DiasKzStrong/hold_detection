@@ -99,14 +99,83 @@ def _render_routes(run: Path, frame_path: Path, frame: dict) -> None:
     overlay.save(frame_path.parent / "routes.jpg", quality=95)
 
 
+def _fuse_spatial_observations(observations: list[dict], distance_m: float) -> list[dict]:
+    spatial = [item for item in observations if item.get("spatial_evidence")]
+    spatial.sort(key=lambda item: (
+        item.get("route_candidate_id") or "",
+        *item["spatial_evidence"]["position_capture_m"],
+        item["observation_id"],
+    ))
+    groups: list[list[dict]] = []
+    for observation in spatial:
+        position = np.asarray(observation["spatial_evidence"]["position_capture_m"])
+        matching = None
+        for group in groups:
+            if group[0].get("route_candidate_id") != observation.get("route_candidate_id"):
+                continue
+            if any(member["frame_id"] == observation["frame_id"] for member in group):
+                continue
+            center = np.median([
+                member["spatial_evidence"]["position_capture_m"] for member in group
+            ], axis=0)
+            if float(np.linalg.norm(position - center)) <= distance_m:
+                matching = group
+                break
+        if matching is None:
+            groups.append([observation])
+        else:
+            matching.append(observation)
+
+    groups.sort(key=lambda group: tuple(np.median([
+        member["spatial_evidence"]["position_capture_m"] for member in group
+    ], axis=0)))
+    physical_holds = []
+    confirmed_groups = [
+        group for group in groups if len({item["frame_id"] for item in group}) >= 2
+    ]
+    for index, group in enumerate(confirmed_groups, 1):
+        evidence = [member["spatial_evidence"] for member in group]
+        position = np.median([item["position_capture_m"] for item in evidence], axis=0)
+        size = np.median([item["size_capture_m"] for item in evidence], axis=0)
+        normals = [item["surface_normal_capture"] for item in evidence
+                   if item["surface_normal_capture"] is not None]
+        normal = np.median(normals, axis=0) if normals else None
+        if normal is not None and np.linalg.norm(normal):
+            normal = normal / np.linalg.norm(normal)
+        protrusions = [item["protrusion_m"] for item in evidence if item["protrusion_m"] is not None]
+        physical_holds.append({
+            "physical_hold_id": f"physical_hold_{index:04d}",
+            "route_candidate_id": group[0].get("route_candidate_id"),
+            "object_kind": group[0]["object_kind"],
+            "coordinate_frame": "polycam_capture_unaligned",
+            "position_3d_m": position.round(6).tolist(),
+            "estimated_size_m": size.round(6).tolist(),
+            "surface_normal": (
+                normal.round(6).tolist() if normal is not None else None
+            ),
+            "protrusion_m": (
+                round(float(np.median(protrusions)), 6) if protrusions else None
+            ),
+            "observation_ids": [item["observation_id"] for item in group],
+            "observation_count": len(group),
+            "fusion_method": "route_color_and_capture_position_radius",
+            "fusion_distance_m": distance_m,
+            "needs_review": True,
+        })
+    return physical_holds
+
+
 def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
     """Create the draft planner scene and route review images for an inference run."""
     frame_paths = sorted(run.glob("*/holds.json"))
     frames: list[tuple[Path, dict]] = [
         (path, json.loads(path.read_text())) for path in frame_paths
     ]
+    from .spatial import estimate_polycam_spatial_evidence
+
     observations = []
-    for _, frame in frames:
+    spatial_observation_count = 0
+    for frame_path, frame in frames:
         with Image.open(frame["source_image"]) as source:
             processed = source.convert("RGB")
         rotation = frame.get("rotation_clockwise_degrees", 0)
@@ -132,6 +201,14 @@ def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
                 if "bbox_color_fallback" not in hold["review_reasons"]:
                     hold["review_reasons"].append("bbox_color_fallback")
             hold["color_lab"] = rgb_to_lab(rgb) if rgb is not None else None
+            hold["spatial_evidence"] = None
+            if hold.get("mask_path"):
+                hold["spatial_evidence"] = estimate_polycam_spatial_evidence(
+                    Path(frame["source_image"]),
+                    frame_path.parent / hold["mask_path"],
+                    frame.get("rotation_clockwise_degrees", 0),
+                )
+                spatial_observation_count += int(hold["spatial_evidence"] is not None)
             if hold["object_kind"] == "hold" and hold["color_lab"] is not None:
                 observations.append(hold)
 
@@ -154,34 +231,42 @@ def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
         })
 
     scene_frames = []
+    scene_observations = []
     for frame_path, frame in frames:
         frame_path.write_text(json.dumps(frame, indent=2, allow_nan=False) + "\n")
         _render_routes(run, frame_path, frame)
+        hold_observations = [
+            {
+                "observation_id": f"{frame['frame_id']}:{hold['hold_id']}",
+                "frame_id": frame["frame_id"],
+                "hold_id": hold["hold_id"],
+                "object_kind": hold["object_kind"],
+                "bbox_xyxy": hold["bbox_xyxy"],
+                "mask_path": (
+                    f"{frame_path.parent.name}/{hold['mask_path']}"
+                    if hold.get("mask_path") else None
+                ),
+                "route_candidate_id": hold.get("route_candidate_id"),
+                "median_rgb": hold.get("median_rgb"),
+                "color_lab": hold.get("color_lab"),
+                "color_method": hold.get("color_method"),
+                "detection_confidence": hold["detector_score"],
+                "segmentation_confidence": hold.get("segmentation_score"),
+                "spatial_evidence": hold.get("spatial_evidence"),
+                "needs_review": hold["needs_review"],
+            }
+            for hold in frame["holds"]
+        ]
+        scene_observations.extend(hold_observations)
         scene_frames.append({
             "frame_id": frame["frame_id"],
             "source_image": frame["source_image"],
             "processed_size_wh": frame["processed_size_wh"],
-            "hold_observations": [
-                {
-                    "observation_id": f"{frame['frame_id']}:{hold['hold_id']}",
-                    "hold_id": hold["hold_id"],
-                    "object_kind": hold["object_kind"],
-                    "bbox_xyxy": hold["bbox_xyxy"],
-                    "mask_path": (
-                        f"{frame_path.parent.name}/{hold['mask_path']}"
-                        if hold.get("mask_path") else None
-                    ),
-                    "route_candidate_id": hold.get("route_candidate_id"),
-                    "median_rgb": hold.get("median_rgb"),
-                    "color_lab": hold.get("color_lab"),
-                    "color_method": hold.get("color_method"),
-                    "detection_confidence": hold["detector_score"],
-                    "segmentation_confidence": hold.get("segmentation_score"),
-                    "needs_review": hold["needs_review"],
-                }
-                for hold in frame["holds"]
-            ],
+            "hold_observations": hold_observations,
         })
+
+    fusion_distance_m = 0.12
+    physical_holds = _fuse_spatial_observations(scene_observations, fusion_distance_m)
 
     scene = {
         "schema_version": "2.0-draft",
@@ -191,8 +276,17 @@ def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
         "color_distance_threshold": color_distance_threshold,
         "route_candidates": route_candidates,
         "frames": scene_frames,
-        "physical_holds": [],
-        "reconstruction": {"status": "not_run"},
+        "physical_holds": physical_holds,
+        "reconstruction": {
+            "status": ("multi_view_rgbd_fusion" if physical_holds else
+                       "rgbd_spatial_evidence" if spatial_observation_count else "not_run"),
+            "spatial_observation_count": spatial_observation_count,
+            "coordinate_frame": (
+                "polycam_capture_unaligned" if spatial_observation_count else None
+            ),
+            "glb_registration": "not_registered",
+            "fusion_distance_m": fusion_distance_m,
+        },
     }
     (run / "scene.json").write_text(json.dumps(scene, indent=2, allow_nan=False) + "\n")
     return scene

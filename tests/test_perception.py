@@ -48,6 +48,20 @@ def test_unknown_and_volume_do_not_invent_grip_labels():
         canonical_type("person")
 
 
+def test_class_agnostic_mode_ignores_legacy_grip_labels():
+    record = make_hold_record(
+        Detection((1, 1, 5, 5), 0.8, "jug"),
+        1,
+        None,
+        0.5,
+        infer_grip_types=False,
+    )
+    assert record["object_kind"] == "hold"
+    assert record["grip_type"] is None
+    assert record["predicted_type"] is None
+    assert "type_not_inferred" not in record["review_reasons"]
+
+
 def test_cnn_disagreement_and_empty_mask_are_reviewed():
     d = Detection((1, 1, 5, 5), 0.8, "jug")
     record = make_hold_record(d, 1, {"crimp": 0.95, "jug": 0.05}, 0.5,
@@ -77,7 +91,7 @@ def test_pipeline_exports_real_mask_pixels_crops_rotation_and_schema(tmp_path):
 
     output = tmp_path / "run"
     summary = run_inference(source, output, FakeDetector([detection]),
-                            segmenter=Segmenter(), rotate=90)
+                            segmenter=Segmenter(), rotate=90, infer_grip_types=True)
     assert summary["detection_count"] == 1
     frame_path = next(output.glob("*/holds.json"))
     frame = json.loads(frame_path.read_text())
@@ -186,6 +200,62 @@ def test_box_only_fallback_exports_reviewable_route_color(tmp_path):
     assert scene["route_candidates"][0]["needs_review"]
 
 
+def test_masked_polycam_observation_exports_metric_spatial_evidence(tmp_path):
+    capture = tmp_path / "capture"
+    images = capture / "keyframes/corrected_images"
+    cameras = capture / "keyframes/corrected_cameras"
+    depths = capture / "keyframes/depth"
+    confidence = capture / "keyframes/confidence"
+    for directory in (images, cameras, depths, confidence):
+        directory.mkdir(parents=True, exist_ok=True)
+    camera = {"cx": 4.0, "cy": 4.0, "fx": 8.0, "fy": 8.0,
+              "width": 8, "height": 8}
+    camera.update({f"t_{row}{column}": float(row == column)
+                   for row in range(3) for column in range(3)})
+    camera.update({"t_03": 0.0, "t_13": 0.0, "t_23": 0.0})
+    depth = np.full((4, 4), 2200, dtype=np.uint16)
+    depth[1:3, 1:3] = 2000
+    for frame_id in ("1", "2"):
+        Image.new("RGB", (8, 8), (180, 30, 30)).save(images / f"{frame_id}.jpg")
+        (cameras / f"{frame_id}.json").write_text(json.dumps(camera))
+        Image.fromarray(depth).save(depths / f"{frame_id}.png")
+        Image.fromarray(np.full((4, 4), 255, dtype=np.uint8)).save(
+            confidence / f"{frame_id}.png"
+        )
+
+    class Segmenter:
+        method = "fixture_masks"
+
+        def segment(self, image, detections):
+            mask = np.zeros((8, 8), dtype=bool)
+            mask[2:6, 2:6] = True
+            return [(mask, 0.95)]
+
+    output = tmp_path / "run"
+    run_inference(
+        images,
+        output,
+        FakeDetector([Detection((2, 2, 6, 6), 0.9, "jug")]),
+        segmenter=Segmenter(),
+        infer_grip_types=False,
+    )
+    scene = json.loads((output / "scene.json").read_text())
+    observation = scene["frames"][0]["hold_observations"][0]
+    spatial = observation["spatial_evidence"]
+    assert spatial["method"] == "polycam_masked_rgbd_unprojection"
+    assert spatial["median_depth_m"] == pytest.approx(2.0)
+    assert spatial["protrusion_m"] == pytest.approx(0.2)
+    assert spatial["position_capture_m"][2] == pytest.approx(2.0)
+    assert scene["reconstruction"]["status"] == "multi_view_rgbd_fusion"
+    assert scene["reconstruction"]["glb_registration"] == "not_registered"
+    assert len(scene["physical_holds"]) == 1
+    physical = scene["physical_holds"][0]
+    assert physical["position_3d_m"][2] == pytest.approx(2.0)
+    assert physical["protrusion_m"] == pytest.approx(0.2)
+    assert physical["surface_normal"] == pytest.approx([0.0, 0.0, -1.0])
+    assert len(physical["observation_ids"]) == 2
+
+
 def test_image_identity_handles_duplicate_stems(tmp_path):
     source = tmp_path / "images"
     for ext in ("jpg", "png"):
@@ -242,6 +312,7 @@ def test_cli_reports_bad_inputs_without_claiming_success(tmp_path, capsys):
     assert not (tmp_path / "run").exists()
     with pytest.raises(SystemExit):
         parser().parse_args(["predict", "wall.jpg", "--output", "run", "--conf", "2"])
+    assert parser().parse_args(["predict", "wall.jpg", "--output", "run"]).classifier == "none"
 
 
 def test_metrics_include_minority_class_errors_and_reject_empty_evaluation():

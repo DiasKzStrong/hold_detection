@@ -40,9 +40,10 @@ Actual SAM GPU inference has not been validated on this CPU-only development mac
 Regenerate the notebook after notebook edits with
 `python scripts/build_colab_notebook.py`; it never embeds photos, weights or tokens.
 
-## Train crop classifiers
+## Legacy grip-classifier research
 
-The project now supports **ImageNet ResNet18 fine-tuning** and **frozen SigLIP +
+Grip classification is outside the current route/spatial pipeline. The preserved
+legacy experiment supports **ImageNet ResNet18 fine-tuning** and **frozen SigLIP +
 linear head**, with labeled YOLO/COCO crop preparation, cached embeddings,
 validation-selected checkpoints, restart and test reports. Artifacts plug into
 SAM 3 using `--classifier trained --classifier-weights /path/to/best.pt`.
@@ -87,23 +88,26 @@ uv run holds predict path/to/photos --output runs/batch-001 --device cpu
 Output directories must be new; existing results are never silently overwritten.
 Open the run's `index.html` in a browser to review detections, masks, color-route
 groups, and crops. Copy the whole run folder to view it locally. Every run gets
-`scene.json`; each frame gets `annotated.jpg`, `routes.jpg`, `holds.json`, masks,
-and individual `crops/`.
+`scene.json`; each frame gets `annotated.jpg`, `routes.jpg`, `holds.json`, and
+individual `crops/`. Segmentation runs additionally export lossless masks.
 `summary.json` records settings, checkpoint hashes, timings and per-frame counts.
 `scene.json` is the future planner interface. Its `physical_holds` list remains
-empty and reconstruction status is `not_run` until multi-view tracking and 3D
-registration are implemented. See [the demo guide](docs/demo.md).
+empty for ordinary photos. For a prepared Polycam capture and instance masks, it
+contains multi-view RGB-D hold candidates with metric position, size, and
+protrusion in the unaligned capture coordinate frame. GLB registration remains
+explicitly `not_registered`. See [the demo guide](docs/demo.md).
 
 Generate a gallery for an older run with `uv run holds gallery runs/<run-name>`.
 
-The default classification uses the detector's joint detection/class score.
-For the separate crop classifier:
+Grip classification is disabled by default. The old detector labels can still be
+requested explicitly for legacy experiments:
 
 ```bash
-uv run holds predict path/to/wall.jpg --output runs/cnn-001 --classifier cnn
+uv run holds predict path/to/wall.jpg --output runs/legacy-types \
+  --classifier detector
 ```
 
-The output retains both the detector label and the crop classifier's six scores.
+Legacy classification output retains detector labels and optional crop-classifier scores.
 Disagreement is flagged for review. Neither model's score is a calibrated
 probability of correctness. Predictions below `--min-type-score` (default 0.5)
 are reported as `unknown`. Volumes have no grip type. The class vocabulary is

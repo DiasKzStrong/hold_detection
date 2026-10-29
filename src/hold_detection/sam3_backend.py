@@ -83,7 +83,8 @@ def fetch_checkpoint(destination: Path, revision="main") -> Path:
     return target
 
 
-def decode_predictions(result, width: int, height: int, iou: float, max_det: int):
+def decode_predictions(result, width: int, height: int, iou: float, max_det: int,
+                       label="hold"):
     """Convert official N×1×H×W masks, keeping identity through filtering/NMS."""
     # Autocast may return BF16, which NumPy cannot represent directly.
     boxes = result["boxes"].detach().float().cpu().numpy()
@@ -107,7 +108,7 @@ def decode_predictions(result, width: int, height: int, iou: float, max_det: int
         mask = np.asarray(mask, dtype=bool)
         if bbox[2] <= bbox[0] or bbox[3] <= bbox[1] or not mask.any():
             continue
-        detections.append(Detection(bbox, float(score), "hold", label_is_type=False))
+        detections.append(Detection(bbox, float(score), label, label_is_type=False))
         aligned_masks.append((mask, float(score)))
     kept = nms_indices(detections, iou)
     if len(kept) > max_det:
@@ -116,11 +117,22 @@ def decode_predictions(result, width: int, height: int, iou: float, max_det: int
     return [detections[i] for i in kept], [aligned_masks[i] for i in kept]
 
 
+def merge_prompt_predictions(results, iou: float, max_det: int):
+    """Deduplicate aligned detections/masks returned by several text prompts."""
+    detections = [detection for prompt_detections, _ in results for detection in prompt_detections]
+    masks = [mask for _, prompt_masks in results for mask in prompt_masks]
+    kept = nms_indices(detections, iou)
+    if len(kept) > max_det:
+        kept = sorted(kept, key=lambda index: detections[index].score, reverse=True)[:max_det]
+    kept = sorted(kept, key=lambda index: (detections[index].bbox[1], detections[index].bbox[0]))
+    return [detections[index] for index in kept], [masks[index] for index in kept]
+
+
 class Sam3Detector:
     method = "sam3_text_prompt"
     score_method = "concept_presence_times_instance_score"
 
-    def __init__(self, checkpoint: Path, prompt: str, device="auto", threads=4):
+    def __init__(self, checkpoint: Path, prompts, device="auto", threads=4):
         import torch
 
         self.device = resolve_device(device)
@@ -148,7 +160,7 @@ class Sam3Detector:
                 enable_inst_interactivity=False, compile=False,
             )
         self.processor = Sam3Processor(self.model, device=self.device)
-        self.prompt = prompt
+        self.prompts = prompts if isinstance(prompts, list) else [("hold", prompts)]
         self._detections, self._masks = None, None
 
     def detect(self, image, confidence=0.5, iou=0.5, max_det=500, **kwargs):
@@ -166,8 +178,13 @@ class Sam3Detector:
             context = torch.autocast("cuda", dtype=dtype)
         with torch.inference_mode(), context:
             state = self.processor.set_image(image)
-            result = self.processor.set_text_prompt(prompt=self.prompt, state=state)
-        self._detections, self._masks = decode_predictions(result, *image.size, iou, max_det)
+            results = []
+            for label, prompt in self.prompts:
+                result = self.processor.set_text_prompt(prompt=prompt, state=state)
+                results.append(decode_predictions(
+                    result, *image.size, iou, max_det, label=label,
+                ))
+        self._detections, self._masks = merge_prompt_predictions(results, iou, max_det)
         return self._detections
 
     def segment(self, image, detections):
