@@ -88,7 +88,7 @@ def test_sam3_adapter_consumes_official_processor_outputs_and_rejects_stale_mask
     html = (output / "index.html").read_text()
     assert "mask PNG" in html and "type not inferred" in html
     assert "scene.json" in html and "Route review" in html
-    assert "route_0001" in html
+    assert "route_candidate_0001" in html
 
 
 def test_sam3_checkpoint_download_pins_resolved_commit_and_checks_official_hash(tmp_path, monkeypatch):

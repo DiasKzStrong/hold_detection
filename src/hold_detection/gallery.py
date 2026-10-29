@@ -44,7 +44,7 @@ def build_gallery(run: Path) -> Path:
             crop = asset_url(run, frame_path.parent, hold["crop_path"])
             mask = (f'<a href="{asset_url(run, frame_path.parent, hold["mask_path"])}">mask PNG</a>'
                     if hold.get("mask_path") else "no mask")
-            route = hold.get("route_id") or "unassigned"
+            route = hold.get("route_candidate_id") or "unassigned"
             swatch = hold.get("median_rgb")
             swatch_html = (
                 f'<span class="swatch" style="background:rgb({swatch[0]},{swatch[1]},{swatch[2]})"></span>'

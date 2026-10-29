@@ -46,7 +46,7 @@ class _RouteCluster:
         self.center = np.median(values, axis=0)
 
 
-def _assign_routes(observations: list[dict], threshold: float) -> list[_RouteCluster]:
+def _cluster_route_candidates(observations: list[dict], threshold: float) -> list[_RouteCluster]:
     clusters: list[_RouteCluster] = []
     for observation in observations:
         value = np.asarray(observation["color_lab"])
@@ -58,10 +58,11 @@ def _assign_routes(observations: list[dict], threshold: float) -> list[_RouteClu
             clusters.append(cluster)
         else:
             clusters[nearest].add(observation)
+    clusters.sort(key=lambda cluster: tuple(cluster.center.round(6)))
     for index, cluster in enumerate(clusters, 1):
-        route_id = f"route_{index:04d}"
+        candidate_id = f"route_candidate_{index:04d}"
         for observation in cluster.members:
-            observation["route_id"] = route_id
+            observation["route_candidate_id"] = candidate_id
     return clusters
 
 
@@ -74,10 +75,10 @@ def _render_routes(run: Path, frame_path: Path, frame: dict) -> None:
     overlay = image.copy()
     draw = ImageDraw.Draw(overlay)
     for hold in frame["holds"]:
-        route_id = hold.get("route_id")
-        if not route_id:
+        candidate_id = hold.get("route_candidate_id")
+        if not candidate_id:
             continue
-        route_number = int(route_id.rsplit("_", 1)[1])
+        route_number = int(candidate_id.rsplit("_", 1)[1])
         color = ROUTE_COLORS[(route_number - 1) % len(ROUTE_COLORS)]
         mask_path = hold.get("mask_path")
         if mask_path:
@@ -89,7 +90,7 @@ def _render_routes(run: Path, frame_path: Path, frame: dict) -> None:
             draw = ImageDraw.Draw(overlay)
         x1, y1, x2, y2 = hold["bbox_xyxy"]
         draw.rectangle((x1, y1, x2, y2), outline=color, width=3)
-        label = f"{hold['hold_id']}  {route_id}"
+        label = f"{hold['hold_id']}  {candidate_id}"
         anchor = (x1, max(0, y1 - 14))
         bounds = draw.textbbox(anchor, label)
         draw.rectangle(bounds, fill="black")
@@ -133,14 +134,14 @@ def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
             if hold["object_kind"] == "hold" and hold["color_lab"] is not None:
                 observations.append(hold)
 
-    clusters = _assign_routes(observations, color_distance_threshold)
-    routes = []
+    clusters = _cluster_route_candidates(observations, color_distance_threshold)
+    route_candidates = []
     for index, cluster in enumerate(clusters, 1):
         representative_rgb = np.median(
             [member["median_rgb"] for member in cluster.members], axis=0
         ).round().astype(int).tolist()
-        routes.append({
-            "route_id": f"route_{index:04d}",
+        route_candidates.append({
+            "route_candidate_id": f"route_candidate_{index:04d}",
             "representative_rgb": representative_rgb,
             "representative_lab": cluster.center.round(3).tolist(),
             "observation_count": len(cluster.members),
@@ -169,7 +170,7 @@ def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
                         f"{frame_path.parent.name}/{hold['mask_path']}"
                         if hold.get("mask_path") else None
                     ),
-                    "route_id": hold.get("route_id"),
+                    "route_candidate_id": hold.get("route_candidate_id"),
                     "median_rgb": hold.get("median_rgb"),
                     "color_lab": hold.get("color_lab"),
                     "color_method": hold.get("color_method"),
@@ -185,9 +186,9 @@ def build_scene(run: Path, color_distance_threshold: float = 22.0) -> dict:
         "schema_version": "2.0-draft",
         "wall_capture_id": run.name,
         "coordinate_space": "image",
-        "route_assumption": "one_color_group_per_route_with_human_review",
+        "route_candidate_assumption": "one_color_group_proposes_one_route_with_human_review",
         "color_distance_threshold": color_distance_threshold,
-        "routes": routes,
+        "route_candidates": route_candidates,
         "frames": scene_frames,
         "physical_holds": [],
         "reconstruction": {"status": "not_run"},

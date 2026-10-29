@@ -18,7 +18,10 @@ Every inference run contains:
 - `index.html`: portable review gallery;
 - `<frame>/routes.jpg`: color-grouped route visualization;
 - `<frame>/holds.json`: full frame-local evidence;
-- `<frame>/masks/`: lossless instance masks.
+
+SAM 3 runs additionally contain `<frame>/masks/` with lossless instance masks.
+The current SAM 3 prompt finds climbing holds only; separate Volume detection is
+a planned milestone and is not claimed in this demo.
 
 The route candidates use mask median color transformed to CIE Lab and a default
 Delta E 76 threshold of 22. They are diagnostics requiring human review, not

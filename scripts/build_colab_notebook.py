@@ -187,7 +187,8 @@ def build_notebook():
             ## 4 · SAM 3 masks and color routes
             SAM proposes masks independently from a text prompt; it does not receive YOLO boxes.
             Each run exports a route review image and draft `scene.json`. Grip classification is
-            outside the current product scope and is disabled by default.
+            outside the current product scope and is disabled by default. This demo prompt finds
+            climbing holds only; a separate Volume pass is not implemented yet.
             With `RUN_SAM3=False` or no GPU, the full YOLO baseline remains available.
             For a trained ResNet18/SigLIP, set `CLASSIFIER='trained'` and provide `best.pt`.
             Use [the training notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Classifier_Training.ipynb)

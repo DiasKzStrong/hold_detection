@@ -128,13 +128,31 @@ def test_pipeline_groups_mask_colors_into_routes_and_exports_scene(tmp_path):
     assert scene["coordinate_space"] == "image"
     assert scene["reconstruction"]["status"] == "not_run"
     assert scene["physical_holds"] == []
-    assert len(scene["routes"]) == 2
-    assert sorted(route["observation_count"] for route in scene["routes"]) == [1, 2]
+    assert len(scene["route_candidates"]) == 2
+    assert sorted(route["observation_count"] for route in scene["route_candidates"]) == [1, 2]
     observations = scene["frames"][0]["hold_observations"]
-    assert observations[0]["route_id"] == observations[1]["route_id"]
-    assert observations[2]["route_id"] != observations[0]["route_id"]
+    assert observations[0]["route_candidate_id"] == observations[1]["route_candidate_id"]
+    assert observations[2]["route_candidate_id"] != observations[0]["route_candidate_id"]
     assert all(observation["color_lab"] for observation in observations)
     assert (next(output.glob("*/routes.jpg"))).is_file()
+
+    reversed_output = tmp_path / "reversed-run"
+    run_inference(
+        source,
+        reversed_output,
+        FakeDetector(list(reversed(detections))),
+        segmenter=Segmenter(),
+    )
+    reversed_scene = json.loads((reversed_output / "scene.json").read_text())
+    original_ids = {
+        tuple(candidate["representative_rgb"]): candidate["route_candidate_id"]
+        for candidate in scene["route_candidates"]
+    }
+    reversed_ids = {
+        tuple(candidate["representative_rgb"]): candidate["route_candidate_id"]
+        for candidate in reversed_scene["route_candidates"]
+    }
+    assert reversed_ids == original_ids
 
 
 def test_zero_detections_is_explicit_and_no_output_in_input_tree(tmp_path):
@@ -159,10 +177,10 @@ def test_box_only_fallback_exports_reviewable_route_color(tmp_path):
     )
     scene = json.loads((output / "scene.json").read_text())
     observation = scene["frames"][0]["hold_observations"][0]
-    assert observation["route_id"] == "route_0001"
+    assert observation["route_candidate_id"] == "route_candidate_0001"
     assert observation["color_method"] == "bbox_median_rgb_fallback"
     assert observation["needs_review"]
-    assert scene["routes"][0]["needs_review"]
+    assert scene["route_candidates"][0]["needs_review"]
 
 
 def test_image_identity_handles_duplicate_stems(tmp_path):

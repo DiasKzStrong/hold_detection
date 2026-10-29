@@ -137,8 +137,8 @@ confidence maps and mesh metadata. It rejects unsafe ZIP paths and existing
 output directories. Point inference at `corrected_images`, not the export root
 or a directory containing depth images. Processing exported data makes no
 requests to Polycam. There is no reconstruction, RGB-D fusion, multi-view hold
-identity or metric-depth claim yet. Color-derived `route_id` values are
-frame-observation candidates; `physical_holds` remains empty.
+identity or metric-depth claim yet. Color-derived `route_candidate_id` values
+belong to frame observations; `physical_holds` remains empty.
 
 ## Optional SAM 2.1 masks
 
@@ -157,7 +157,8 @@ curl --fail --location \
 
 Use `.venv/bin/holds` after installing SAM: plain `uv run` can synchronize away
 packages not in the base lock. Mask PNGs preserve the entire binary mask,
-including holes; mask-derived median RGB is exported separately from route IDs.
+including holes; mask-derived median RGB is exported separately from route
+candidate IDs.
 SAM refines boxes; it cannot recover a hold the detector never proposed.
 
 During the initial cloud run, the official checkpoint host returned HTTP 403
@@ -187,8 +188,8 @@ unlabeled diagnostics. Save low-confidence proposals during inference (e.g.
 `--conf 0.05`) for AP; sliders cannot restore proposals discarded earlier.
 Box AP is class-agnostic; the explicit maxDets=500 differs from standard COCO's 100.
 
-To evaluate the crop CNN on your own labels (one integer class ID per TXT file,
-in the upstream class order):
+The legacy grip-type research remains available but is not part of the current
+route-perception scope. To evaluate its crop CNN on old labels:
 
 ```bash
 uv run holds evaluate-crops path/to/test_split --output runs/cnn-evaluation.json
@@ -203,8 +204,8 @@ flags, artifact export, rotation, empty predictions, output preservation and
 safe Polycam import. Real model inference is checked separately on our exported
 RGB frames. Unlabeled predictions do not establish accuracy.
 
-Next: annotate holds, types, and non-hold false positives on selected frames;
-split by physical wall/scan rather than random crops; compare detector labels
-with the crop CNN and then a SigLIP 2 baseline. Evaluate detection recall and
-per-class F1 before relying on labels for the planner. Keep ambiguous grip types
-explicit. Two green routes on wallA_1 require more than color to distinguish.
+Next: annotate hold masks, volumes, color groups, and non-hold false positives;
+split by physical wall/capture session rather than random frames; compare SAM 3
+with a trained YOLO segmentation model. Evaluate detection recall and mask AP
+before multi-view identity and 3D association. Two green routes on wallA_1
+require human review or geometry to distinguish.
