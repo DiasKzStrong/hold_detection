@@ -300,6 +300,7 @@ def test_wall_bundle_discovers_and_prepares_project_layout(tmp_path):
     archive = wall / "wallC_raw_data.zip"
     make_archive(archive)
     (wall / "wallC_scan.glb").write_bytes(b"glTF fixture")
+    (wall / "nanob_hunyuan.glb").write_bytes(b"alternative fixture")
     (wall / "wallC_obj.zip").write_bytes(b"backup fixture")
     (wall / "yellow_v3.HEIC").write_bytes(b"photo fixture")
     (wall / "route_notes.txt").write_text("Route 1: yellow")
@@ -310,6 +311,8 @@ def test_wall_bundle_discovers_and_prepares_project_layout(tmp_path):
     assert info["raw_archive_info"]["complete_frame_ids"] == ["123"]
     assert info["route_photos"][0].endswith("yellow_v3.HEIC")
     assert info["route_notes"].endswith("route_notes.txt")
+    assert info["glb"].endswith("wallC_scan.glb")
+    assert info["other_glb_files"][0].endswith("nanob_hunyuan.glb")
 
     prepared = prepare_wall_bundle(wall, tmp_path / "prepared-wall")
     assert Path(prepared["prepared_rgb_source"]).name == "corrected_images"

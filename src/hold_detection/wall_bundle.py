@@ -53,6 +53,14 @@ def inspect_wall_bundle(directory: Path) -> dict:
         directory,
         lambda path: path.is_file() and path.suffix.lower() == ".glb",
     )
+    scan_glb_files = [
+        path for path in glb_files if path.stem.lower().endswith("_scan")
+    ]
+    selected_glb = (
+        scan_glb_files[0] if len(scan_glb_files) == 1
+        else glb_files[0] if len(glb_files) == 1
+        else None
+    )
     obj_backups = _matches(
         directory,
         lambda path: (
@@ -85,8 +93,11 @@ def inspect_wall_bundle(directory: Path) -> dict:
     problems = []
     if len(raw_sources) != 1:
         problems.append(f"expected exactly one raw_data ZIP or directory, found {len(raw_sources)}")
-    if len(glb_files) != 1:
-        problems.append(f"expected exactly one GLB, found {len(glb_files)}")
+    if selected_glb is None:
+        problems.append(
+            "could not select one Polycam GLB: expected exactly one *_scan.glb "
+            f"or one total GLB, found {len(scan_glb_files)} scan and {len(glb_files)} total"
+        )
     raw_info = None
     if len(raw_sources) == 1:
         raw_info = (
@@ -108,7 +119,10 @@ def inspect_wall_bundle(directory: Path) -> dict:
             if len(raw_sources) == 1 and raw_sources[0].is_file() else None
         ),
         "raw_archive_info": raw_info,
-        "glb": str(glb_files[0].resolve()) if len(glb_files) == 1 else None,
+        "glb": str(selected_glb.resolve()) if selected_glb else None,
+        "other_glb_files": [
+            str(path.resolve()) for path in glb_files if path != selected_glb
+        ],
         "obj_backups": [str(path.resolve()) for path in obj_backups],
         "route_photos": [str(path.resolve()) for path in route_photos],
         "route_notes": str(route_notes[0].resolve()) if len(route_notes) == 1 else None,
