@@ -30,6 +30,10 @@ def build_gallery(run: Path) -> Path:
         frame = json.loads(frame_path.read_text())
         title = escape(Path(frame["source_image"]).name)
         annotation = asset_url(run, frame_path.parent, "annotated.jpg")
+        route_review = (
+            asset_url(run, frame_path.parent, "routes.jpg")
+            if (frame_path.parent / "routes.jpg").is_file() else None
+        )
         details = []
         for hold in frame["holds"]:
             label = hold["grip_type"] or hold["object_kind"]
@@ -40,17 +44,27 @@ def build_gallery(run: Path) -> Path:
             crop = asset_url(run, frame_path.parent, hold["crop_path"])
             mask = (f'<a href="{asset_url(run, frame_path.parent, hold["mask_path"])}">mask PNG</a>'
                     if hold.get("mask_path") else "no mask")
+            route = hold.get("route_id") or "unassigned"
+            swatch = hold.get("median_rgb")
+            swatch_html = (
+                f'<span class="swatch" style="background:rgb({swatch[0]},{swatch[1]},{swatch[2]})"></span>'
+                if swatch else ""
+            )
             details.append(
                 f'<article class="hold" data-review="{str(hold["needs_review"]).lower()}">'
                 f'<a href="{crop}"><img loading="lazy" src="{crop}" alt="hold crop"></a>'
-                f'<p>{escape(hold["hold_id"])} · {escape(label)}<br>{score_text}'
+                f'<p>{escape(hold["hold_id"])} · {escape(label)}<br>'
+                f'{swatch_html}{escape(route)}<br>{score_text}'
                 f'<br><span class="review">{escape(review)}</span><br>{mask}</p></article>'
             )
         frame_json = asset_url(run, frame_path.parent, "holds.json")
         sections.append(
             f'<section><h2>{title}</h2><p>{len(frame["holds"])} candidates · '
             f'<a href="{frame_json}">JSON</a></p>'
-            f'<a href="{annotation}"><img class="wall" loading="lazy" '
+            + (f'<h3>Route review</h3><a href="{route_review}"><img class="wall" loading="lazy" '
+               f'src="{route_review}" alt="Color-grouped routes"></a>' if route_review else '')
+            + '<h3>Detection review</h3>'
+            + f'<a href="{annotation}"><img class="wall" loading="lazy" '
             f'src="{annotation}" alt="Annotated wall"></a>'
             f'<details><summary>Show crops, types and masks</summary><div class="crops">'
             + "".join(details) + '</div></details></section>'
@@ -63,11 +77,13 @@ a{color:#87c6ff}header{margin-bottom:24px}section{border-top:1px solid #454954;p
 .wall{max-width:100%;max-height:850px}summary{cursor:pointer;padding:14px 0}
 .crops{display:grid;grid-template-columns:repeat(auto-fill,minmax(170px,1fr));gap:12px}
 .hold{background:#242933;padding:10px;overflow-wrap:anywhere}.hold img{width:100%;height:140px;object-fit:contain}
-.hold p{font-size:13px}.review{color:#ffc773}body.review-only .hold[data-review="false"]{display:none}
+.hold p{font-size:13px}.review{color:#ffc773}.swatch{display:inline-block;width:12px;height:12px;border:1px solid #fff;margin-right:6px;vertical-align:-1px}body.review-only .hold[data-review="false"]{display:none}
 </style><header><h1>DeMoSearch results</h1>"""
+    scene_link = '<p><a href="scene.json">Download scene.json</a></p>' if (run / "scene.json").is_file() else ""
     html += (f'<p>{summary["frame_count"]} frames · {summary["detection_count"]} candidate observations · '
              f'masks {"enabled" if summary["segmentation_enabled"] else "disabled"}</p>'
-             '<p>Repeated views and false positives are included. Scores are not calibrated accuracy.</p>'
+             + scene_link
+             + '<p>Repeated views and false positives are included. Scores are not calibrated accuracy.</p>'
              '<label><input type="checkbox" onchange="document.body.classList.toggle(\'review-only\',this.checked)"> '
              'Show only review crops</label></header>' + "".join(sections) + '</html>')
     target.write_text(html, encoding="utf-8")

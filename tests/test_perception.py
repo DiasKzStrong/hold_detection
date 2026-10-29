@@ -95,6 +95,48 @@ def test_pipeline_exports_real_mask_pixels_crops_rotation_and_schema(tmp_path):
         run_inference(source, output, FakeDetector([]))
 
 
+def test_pipeline_groups_mask_colors_into_routes_and_exports_scene(tmp_path):
+    source = tmp_path / "wall.png"
+    pixels = np.zeros((12, 30, 3), dtype=np.uint8)
+    pixels[:, :10] = (210, 35, 35)
+    pixels[:, 10:20] = (190, 45, 45)
+    pixels[:, 20:] = (30, 80, 220)
+    Image.fromarray(pixels).save(source)
+    detections = [
+        Detection((0, 0, 10, 12), 0.9, "jug"),
+        Detection((10, 0, 20, 12), 0.9, "crimp"),
+        Detection((20, 0, 30, 12), 0.9, "sloper"),
+    ]
+
+    class Segmenter:
+        method = "fixture_masks"
+
+        def segment(self, image, detections):
+            masks = []
+            for detection in detections:
+                mask = np.zeros((image.height, image.width), dtype=bool)
+                x1, y1, x2, y2 = map(int, detection.bbox)
+                mask[y1:y2, x1:x2] = True
+                masks.append((mask, 0.95))
+            return masks
+
+    output = tmp_path / "run"
+    run_inference(source, output, FakeDetector(detections), segmenter=Segmenter())
+
+    scene = json.loads((output / "scene.json").read_text())
+    assert scene["schema_version"] == "2.0-draft"
+    assert scene["coordinate_space"] == "image"
+    assert scene["reconstruction"]["status"] == "not_run"
+    assert scene["physical_holds"] == []
+    assert len(scene["routes"]) == 2
+    assert sorted(route["observation_count"] for route in scene["routes"]) == [1, 2]
+    observations = scene["frames"][0]["hold_observations"]
+    assert observations[0]["route_id"] == observations[1]["route_id"]
+    assert observations[2]["route_id"] != observations[0]["route_id"]
+    assert all(observation["color_lab"] for observation in observations)
+    assert (next(output.glob("*/routes.jpg"))).is_file()
+
+
 def test_zero_detections_is_explicit_and_no_output_in_input_tree(tmp_path):
     source = tmp_path / "images"
     source.mkdir()
@@ -104,6 +146,23 @@ def test_zero_detections_is_explicit_and_no_output_in_input_tree(tmp_path):
     summary = run_inference(source, tmp_path / "empty", FakeDetector([]))
     assert summary["frame_count"] == 1 and summary["detection_count"] == 0
     assert not summary["segmentation_enabled"]
+
+
+def test_box_only_fallback_exports_reviewable_route_color(tmp_path):
+    source = tmp_path / "wall.png"
+    Image.new("RGB", (12, 12), (35, 180, 70)).save(source)
+    output = tmp_path / "run"
+    run_inference(
+        source,
+        output,
+        FakeDetector([Detection((2, 2, 10, 10), 0.8, "jug")]),
+    )
+    scene = json.loads((output / "scene.json").read_text())
+    observation = scene["frames"][0]["hold_observations"][0]
+    assert observation["route_id"] == "route_0001"
+    assert observation["color_method"] == "bbox_median_rgb_fallback"
+    assert observation["needs_review"]
+    assert scene["routes"][0]["needs_review"]
 
 
 def test_image_identity_handles_duplicate_stems(tmp_path):

@@ -193,6 +193,8 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
         "evaluation": "Unlabeled inference; detection/type accuracy has not been measured.",
     }
     (output / "summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
+    from .scene import build_scene
+    build_scene(output)
     from .gallery import build_gallery
     build_gallery(output)
     return summary

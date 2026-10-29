@@ -5,7 +5,7 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "demo-hold-detection"
 version = "0.1.0"
-description = "DeMoSearch: climbing hold detection, SAM segmentation, and supervised crop classifiers"
+description = "DeMoSearch: climbing hold segmentation, color-route proposals, and 3D-ready scene artifacts"
 readme = "README.md"
 requires-python = ">=3.10,<3.14"
 dependencies = [

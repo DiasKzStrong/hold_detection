@@ -158,7 +158,7 @@ def parser():
     evaluate.add_argument("--device", default="auto")
     evaluate.add_argument("--threads", type=positive, default=4)
     predict = commands.add_parser(
-        "predict", help="Find holds, predict types, optionally refine masks"
+        "predict", help="Find holds with the legacy YOLO detector; optionally refine masks"
     )
     predict.add_argument(
         "source", type=Path, help="An image or directory of RGB images"
@@ -203,7 +203,7 @@ def parser():
     sam.add_argument("--output", type=Path, required=True)
     sam.add_argument("--weights", type=Path, default=Path("models/sam3/sam3.pt"))
     sam.add_argument("--prompt", default="climbing hold")
-    sam.add_argument("--classifier", choices=("none", "cnn", "trained"), default="cnn")
+    sam.add_argument("--classifier", choices=("none", "cnn", "trained"), default="none")
     sam.add_argument(
         "--classifier-weights", type=Path, default=Path("models/climbing-cnn.pth")
     )

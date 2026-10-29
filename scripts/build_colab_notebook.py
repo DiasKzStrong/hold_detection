@@ -20,13 +20,13 @@ def cell(kind, name, source, hidden=False):
 def build_notebook():
     cells = [
         cell("markdown", "intro", """
-            # DeMoSearch · YOLO vs SAM 3
-            **One photo set → two models → visual comparison → measurable results.**
+            # DeMoSearch · hold masks and color routes
+            **One wall capture → two perception backends → reviewable route candidates.**
 
-            | Experiment | Localization | Hold type |
+            | Experiment | Localization | Route evidence |
             |:---|:---|:---|
-            | **YOLO11s baseline** | Bounding boxes | Six classes from the detector head |
-            | **SAM 3 + classifier** | Text-prompted instance masks | Legacy CNN or trained ResNet18/SigLIP |
+            | **YOLO11s baseline** | Bounding boxes | Fallback only without masks |
+            | **SAM 3** | Text-prompted instance masks | Mask color in CIE Lab |
 
             Start with 3 frames. Select **Runtime → Change runtime type → GPU**.
             Model inference uses a private Python 3.12 environment, even with a Python 3.13 kernel.
@@ -34,8 +34,8 @@ def build_notebook():
             access to [facebook/sam3](https://huggingface.co/facebook/sam3).
 
             **Results:** original / YOLO / SAM side by side, frame and threshold controls,
-            crop grids, latency and score plots. With COCO annotations: precision/recall/F1,
-            box AP, mask AP/IoU and type confusion matrices. **No ground truth, no quality claims.**
+            route review images, `scene.json`, crop grids, latency and score plots. With COCO
+            annotations: precision/recall/F1 and box/mask AP. **No ground truth, no quality claims.**
         """),
         cell("markdown", "setup-heading", """
             ## 1 · Environment
@@ -123,7 +123,7 @@ def build_notebook():
             YOLO_THRESHOLD = 0.35    # @param {type: "number"}
             SAM_THRESHOLD = 0.50     # @param {type: "number"}
             MIN_TYPE_SCORE = 0.50    # @param {type: "number"}
-            CLASSIFIER = 'cnn'  # @param ["cnn", "trained", "none"]
+            CLASSIFIER = 'none'  # @param ["none", "cnn", "trained"]
             CLASSIFIER_WEIGHTS = ''  # @param {type: "string"}
 
             if CLASSIFIER == 'trained' and not Path(CLASSIFIER_WEIGHTS).is_file():
@@ -184,9 +184,10 @@ def build_notebook():
             display(plot_comparison(RUNS, thresholds=THRESHOLDS)); plt.close('all')
         """),
         cell("markdown", "sam-heading", """
-            ## 4 · SAM 3 + crop classifier
+            ## 4 · SAM 3 masks and color routes
             SAM proposes masks independently from a text prompt; it does not receive YOLO boxes.
-            Localization is compared separately from type classification quality.
+            Each run exports a route review image and draft `scene.json`. Grip classification is
+            outside the current product scope and is disabled by default.
             With `RUN_SAM3=False` or no GPU, the full YOLO baseline remains available.
             For a trained ResNet18/SigLIP, set `CLASSIFIER='trained'` and provide `best.pt`.
             Use [the training notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Classifier_Training.ipynb)

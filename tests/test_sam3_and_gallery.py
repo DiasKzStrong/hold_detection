@@ -87,6 +87,8 @@ def test_sam3_adapter_consumes_official_processor_outputs_and_rejects_stale_mask
     assert all(h["type_score"] is None for h in frame["holds"])
     html = (output / "index.html").read_text()
     assert "mask PNG" in html and "type not inferred" in html
+    assert "scene.json" in html and "Route review" in html
+    assert "route_0001" in html
 
 
 def test_sam3_checkpoint_download_pins_resolved_commit_and_checks_official_hash(tmp_path, monkeypatch):
@@ -126,7 +128,7 @@ def test_sam3_fails_clearly_without_cuda_before_creating_output(tmp_path, monkey
     assert "requires an NVIDIA CUDA GPU" in capsys.readouterr().err
     assert not (tmp_path / "run").exists()
     args = parser().parse_args(["sam3", str(image), "--output", "run"])
-    assert args.prompt == "climbing hold" and args.classifier == "cnn"
+    assert args.prompt == "climbing hold" and args.classifier == "none"
 
 
 def test_gallery_escapes_labels_and_rejects_external_assets_and_user_files(tmp_path):

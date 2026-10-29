@@ -1,7 +1,8 @@
-# DeMoSearch hold detection
+# DeMoSearch climbing wall perception
 
-A local baseline for finding climbing holds/volumes and predicting their types
-from wall photographs. It uses the trained YOLO11s checkpoint from
+A research pipeline for finding climbing holds and volumes, proposing routes
+from mask colors, and preparing observations for multi-view 3D association. It
+uses the trained YOLO11s checkpoint from
 [Marcuss2106's project](https://github.com/Marcuss2106/indoor-climbing-gym-hold-classification),
 with an optional separate crop CNN from the same project and an optional
 SAM 2.1 adapter for box-prompted instance masks.
@@ -11,16 +12,16 @@ See [SAM 3 setup and viewing instructions](docs/sam3.md). Its official code was
 installed, but this cloud machine lacks CUDA and Hugging Face weights are blocked
 by its proxy; actual SAM 3 predictions are not yet verified.
 
-This is an inference baseline, not a validated classifier for our gym.
+This is an inference baseline, not a validated route or reconstruction system.
 See [checkpoint provenance and limitations](docs/model-provenance.md).
 
 ## Google Colab
 
 [Open the notebook in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_SAM3_Colab.ipynb).
 
-The notebook compares **YOLO11s detection + types** with **SAM 3 masks + crop CNN**
-on the same photos. It has a frame selector, side-by-side images, threshold sliders,
-boxes/masks toggles, crop grids, latency plots and an offline report download.
+The notebook compares **YOLO11s detection** with **SAM 3 instance masks** on the
+same photos. It exports mask-color route candidates, a draft `scene.json`, route
+review images, diagnostics, and an offline report download.
 Start with its default of three photos. YOLO runs first, even without GPU/HF access.
 
 Select a GPU runtime for SAM; the notebook creates its own Python 3.12 model
@@ -76,7 +77,7 @@ For GPU development, install the appropriate official PyTorch/torchvision
 2.7.1/0.22.1 wheels into `.venv` using `uv pip`; use `.venv/bin/holds` directly
 afterward, because another `uv sync` restores the locked CPU environment.
 
-## Find holds and predict types
+## Find holds and propose color routes
 
 ```bash
 uv run holds predict path/to/wall.jpg --output runs/wall-001
@@ -84,11 +85,14 @@ uv run holds predict path/to/photos --output runs/batch-001 --device cpu
 ```
 
 Output directories must be new; existing results are never silently overwritten.
-Open the run's `index.html` in a browser to view all annotated photos and expand
-their crops/type predictions. Copy the whole run folder to view it locally.
-Each frame gets `annotated.jpg`, `holds.json`, and individual `crops/`.
+Open the run's `index.html` in a browser to review detections, masks, color-route
+groups, and crops. Copy the whole run folder to view it locally. Every run gets
+`scene.json`; each frame gets `annotated.jpg`, `routes.jpg`, `holds.json`, masks,
+and individual `crops/`.
 `summary.json` records settings, checkpoint hashes, timings and per-frame counts.
-IDs are frame-local; multi-view tracking and 3D registration are not implemented.
+`scene.json` is the future planner interface. Its `physical_holds` list remains
+empty and reconstruction status is `not_run` until multi-view tracking and 3D
+registration are implemented. See [the demo guide](docs/demo.md).
 
 Generate a gallery for an older run with `uv run holds gallery runs/<run-name>`.
 
@@ -132,8 +136,9 @@ The importer preserves original and corrected RGB/camera pairs, depth maps,
 confidence maps and mesh metadata. It rejects unsafe ZIP paths and existing
 output directories. Point inference at `corrected_images`, not the export root
 or a directory containing depth images. Processing exported data makes no
-requests to Polycam. There is no reconstruction, RGB-D fusion, route extraction
-or metric-depth claim yet; `route_id` and `position_3d` remain null.
+requests to Polycam. There is no reconstruction, RGB-D fusion, multi-view hold
+identity or metric-depth claim yet. Color-derived `route_id` values are
+frame-observation candidates; `physical_holds` remains empty.
 
 ## Optional SAM 2.1 masks
 
