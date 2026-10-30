@@ -94,7 +94,8 @@ def prepare_runtime(work: Path, project: Path, sam3=False, accelerator="auto", t
     run_logged([*install, *TORCH_PACKAGES, "--index-url", index],
                project, work / "logs/install_torch.log", extra_env=tool_env)
     common = ["numpy==1.26.4", "opencv-python==4.11.0.86", "ultralytics==8.3.249",
-              "pycocotools==2.0.11", "pillow>=11,<13", "matplotlib>=3.8,<4"]
+              "pycocotools==2.0.11", "pillow>=11,<13", "matplotlib>=3.8,<4",
+              "scipy>=1.14,<2", "trimesh>=4.10,<6"]
     run_logged([*install, *TORCH_PACKAGES, *common], project,
                work / "logs/install_baseline.log", extra_env=tool_env)
     if training:
@@ -137,7 +138,7 @@ if cuda_available:
                         torch.tensor([1.], device='cuda'), 0.5)
     torch.cuda.synchronize()
 packages={}
-for p in ['torchvision','ultralytics','sam3','pycocotools','triton','transformers']:
+for p in ['torchvision','ultralytics','sam3','pycocotools','scipy','trimesh','triton','transformers']:
     try: packages[p]=version(p)
     except PackageNotFoundError: packages[p]=None
 print(json.dumps({'python':sys.version.split()[0],'torch':torch.__version__,
