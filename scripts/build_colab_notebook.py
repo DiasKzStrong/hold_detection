@@ -20,8 +20,14 @@ def cell(kind, name, source, hidden=False):
 def build_notebook():
     cells = [
         cell("markdown", "intro", """
-            # DeMoSearch · hold masks and color routes
-            **One wall capture → two perception backends → reviewable route candidates.**
+            # DeMoSearch · 2D and 3D wall analysis
+            **One selected wall section → detected holds → planner-ready wall data.**
+
+            The notebook has two analysis modes. **2D** accepts a photo and exports normalized
+            image positions. **3D** accepts a multi-view Polycam wall bundle and additionally
+            fuses observations in metric capture space and maps them to its GLB when registration
+            succeeds. It does not generate a climbing route: `wall_scene.json` is the input for a
+            separate graph-based route algorithm.
 
             | Experiment | Localization | Route evidence |
             |:---|:---|:---|
@@ -120,6 +126,7 @@ def build_notebook():
                 print('GLB:', prepared.metadata['prepared_glb'])
         """, hidden=True),
         cell("code", "settings", """
+            REQUESTED_ANALYSIS_MODE = 'auto'  # @param ["auto", "2d", "3d"]
             MAX_IMAGES = 3       # @param {type: "integer"}
             ROTATE = -1          # @param {type: "integer"}
             RUN_SAM3 = True      # @param {type: "boolean"}
@@ -128,6 +135,12 @@ def build_notebook():
             CANDIDATE_FLOOR = 0.05    # @param {type: "number"}
             YOLO_THRESHOLD = 0.35    # @param {type: "number"}
             SAM_THRESHOLD = 0.50     # @param {type: "number"}
+            if REQUESTED_ANALYSIS_MODE not in {'auto', '2d', '3d'}:
+                raise ValueError("REQUESTED_ANALYSIS_MODE must be 'auto', '2d' or '3d'.")
+            detected_mode = '3d' if prepared.kind in {'polycam', 'wall_bundle'} else '2d'
+            ANALYSIS_MODE = detected_mode if REQUESTED_ANALYSIS_MODE == 'auto' else REQUESTED_ANALYSIS_MODE
+            if ANALYSIS_MODE == '3d' and prepared.kind not in {'polycam', 'wall_bundle'}:
+                raise ValueError('3D analysis requires a Polycam RGB-D capture or complete wall bundle.')
             if MAX_IMAGES < 0 or ROTATE not in (-1, 0, 90, 180, 270):
                 raise ValueError('MAX_IMAGES must be >= 0; ROTATE must be -1, 0, 90, 180 or 270.')
             if not all(0 <= v <= 1 for v in [CANDIDATE_FLOOR, YOLO_THRESHOLD, SAM_THRESHOLD]):
@@ -139,7 +152,8 @@ def build_notebook():
             EXPERIMENT = PROJECT / 'runs' / ('comparison_' + experiment_id)
             EXPERIMENT.mkdir(parents=True, exist_ok=False)
             RUNS, THRESHOLDS = {}, {}
-            print('Preview rotation:', rotation, '| images:', MAX_IMAGES or 'all')
+            print('Analysis mode:', ANALYSIS_MODE.upper(), '| rotation:', rotation,
+                  '| images:', MAX_IMAGES or 'all')
         """),
         cell("markdown", "protocol-note", """
             `MAX_IMAGES=0` selects all frames. `ROTATE=-1` means 90° for our Polycam scan
@@ -242,11 +256,81 @@ def build_notebook():
                     if 'cuda' in str(error).lower() and 'out of memory' in str(error).lower():
                         print('For CUDA out-of-memory errors, try a larger GPU.')
         """),
+        cell("markdown", "wall-scene-heading", """
+            ## 5 · Unified wall-scene contract
+            Both modes end at the same seam: a versioned JSON document for the downstream
+            graph algorithm. In 2D, each frame-local Hold Observation has normalized image
+            coordinates. In 3D, repeated observations are fused into Physical Holds with metric
+            coordinates. Human semantic fields are present but default to `unknown`; a future UI
+            can edit them without changing hold identities. No route or beta is generated here.
+        """),
+        cell("code", "wall-scene-contract", """
+            # This pure adapter is intentionally visible: it is the hand-off to the route algorithm.
+            def build_downstream_wall_scene(scene, analysis_mode):
+                if analysis_mode not in {'2d', '3d'}:
+                    raise ValueError("analysis_mode must be '2d' or '3d'")
+
+                annotation_defaults = {
+                    'hold_type': 'unknown',
+                    'opening_direction': 'unknown',
+                    'is_start': False,
+                    'is_finish': False,
+                }
+                observations = []
+                for frame in scene.get('frames', []):
+                    width, height = frame['processed_size_wh']
+                    for item in frame.get('hold_observations', []):
+                        hold = dict(item)
+                        x1, y1, x2, y2 = hold['bbox_xyxy']
+                        hold['position_2d_normalized'] = [
+                            round((x1 + x2) / (2 * width), 6),
+                            round((y1 + y2) / (2 * height), 6),
+                        ]
+                        hold['human_annotations'] = dict(annotation_defaults)
+                        observations.append(hold)
+
+                if analysis_mode == '3d':
+                    holds = []
+                    for item in scene.get('physical_holds', []):
+                        hold = dict(item)
+                        hold['human_annotations'] = dict(annotation_defaults)
+                        holds.append(hold)
+                else:
+                    holds = observations
+
+                reconstruction = dict(scene.get('reconstruction', {}))
+                if reconstruction.get('glb_registration') == 'registered':
+                    spatial_status = 'glb_registered'
+                elif analysis_mode == '3d' and holds:
+                    spatial_status = 'capture_space_only'
+                else:
+                    spatial_status = 'not_available'
+
+                return {
+                    'schema_version': '1.0-notebook',
+                    'source_scene_schema_version': scene.get('schema_version'),
+                    'wall_capture_id': scene.get('wall_capture_id'),
+                    'analysis_mode': analysis_mode,
+                    'planner_input_only': True,
+                    'coordinate_convention': (
+                        'metric_3d_when_available' if analysis_mode == '3d'
+                        else 'normalized_image_xy'
+                    ),
+                    'spatial_status': spatial_status,
+                    'reconstruction': reconstruction,
+                    'route_candidates': scene.get('route_candidates', []),
+                    'hold_observations': observations,
+                    'holds': holds,
+                }
+        """),
         cell("code", "scene-summary", """
-            # @title Inspect route candidates and spatial output
+            # @title Export holds and spatial information for the graph algorithm
             import pandas as pd
             scene_run = RUNS.get('SAM 3', RUNS['YOLO11s'])
             scene = json.loads((scene_run / 'scene.json').read_text())
+            wall_scene = build_downstream_wall_scene(scene, ANALYSIS_MODE)
+            wall_scene_path = scene_run / 'wall_scene.json'
+            wall_scene_path.write_text(json.dumps(wall_scene, indent=2, allow_nan=False) + '\\n')
             spatial = scene['reconstruction']
             print('Route candidates:', len(scene['route_candidates']))
             print('Physical holds:', len(scene['physical_holds']))
@@ -260,11 +344,11 @@ def build_notebook():
             print('GLB:', spatial.get('glb_path') or 'not supplied')
             if scene['physical_holds']:
                 display(pd.DataFrame(scene['physical_holds']).head(20))
-            print('Planner artifact:', scene_run / 'scene.json')
+            print('Downstream graph input:', wall_scene_path)
             display(HTML(f'<a href="{scene_run / "index.html"}" target="_blank">Open offline review gallery</a>'))
         """),
         cell("markdown", "viewer-heading", """
-            ## 5 · Frame-by-frame comparison
+            ## 6 · Frame-by-frame comparison
             Select a frame, adjust thresholds, and toggle masks/boxes. ID labels are off
             by default to avoid obscuring holds. Inspect masks and scores in the crops below.
         """),

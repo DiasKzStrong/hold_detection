@@ -24,6 +24,10 @@ def load_notebook():
     return nbformat.read(NOTEBOOK, as_version=4)
 
 
+def notebook_cell_source(cell_id):
+    return next(c.source for c in load_notebook().cells if c.id == cell_id)
+
+
 def test_notebook_is_valid_readable_and_unexecuted():
     notebook = load_notebook()
     nbformat.validate(notebook)
@@ -54,6 +58,77 @@ def test_experiment_settings_execute_without_gpu_or_authentication(tmp_path):
     assert namespace["RUNS"] == {}
     assert namespace["EXPERIMENT"].is_dir()
     assert namespace["CANDIDATE_FLOOR"] < namespace["YOLO_THRESHOLD"]
+
+
+def test_notebook_exposes_explicit_2d_and_3d_analysis_modes(tmp_path):
+    namespace = {"prepared": SimpleNamespace(kind="photos"), "PROJECT": tmp_path,
+                 "datetime": datetime, "timezone": timezone, "uuid": uuid, "Path": Path}
+    exec(compile(notebook_cell_source("settings"), "settings", "exec"), namespace)
+    assert namespace["ANALYSIS_MODE"] == "2d"
+
+    namespace = {"prepared": SimpleNamespace(kind="wall_bundle"), "PROJECT": tmp_path,
+                 "datetime": datetime, "timezone": timezone, "uuid": uuid, "Path": Path}
+    exec(compile(notebook_cell_source("settings"), "settings", "exec"), namespace)
+    assert namespace["ANALYSIS_MODE"] == "3d"
+
+
+def test_downstream_wall_scene_contract_keeps_2d_holds_without_planning():
+    namespace = {}
+    exec(compile(notebook_cell_source("wall-scene-contract"),
+                 "wall-scene-contract", "exec"), namespace)
+    scene = {
+        "schema_version": "2.0-draft",
+        "wall_capture_id": "fixture",
+        "route_candidates": [],
+        "frames": [{
+            "frame_id": "frame-1",
+            "processed_size_wh": [200, 100],
+            "hold_observations": [{
+                "observation_id": "frame-1:hold-1",
+                "hold_id": "hold-1",
+                "bbox_xyxy": [20, 10, 60, 30],
+                "route_candidate_id": None,
+                "object_kind": "hold",
+                "detection_confidence": 0.9,
+            }],
+        }],
+        "physical_holds": [],
+        "reconstruction": {"status": "not_run", "glb_registration": "not_registered"},
+    }
+    result = namespace["build_downstream_wall_scene"](scene, "2d")
+    assert result["analysis_mode"] == "2d"
+    assert result["planner_input_only"] is True
+    assert result["holds"][0]["position_2d_normalized"] == [0.2, 0.2]
+    assert result["holds"][0]["human_annotations"] == {
+        "hold_type": "unknown", "opening_direction": "unknown",
+        "is_start": False, "is_finish": False,
+    }
+    assert "route_plan" not in result
+
+
+def test_downstream_wall_scene_contract_keeps_metric_3d_mapping():
+    namespace = {}
+    exec(compile(notebook_cell_source("wall-scene-contract"),
+                 "wall-scene-contract", "exec"), namespace)
+    scene = {
+        "schema_version": "2.0-draft",
+        "wall_capture_id": "fixture-3d",
+        "route_candidates": [], "frames": [],
+        "physical_holds": [{
+            "physical_hold_id": "physical-hold-1",
+            "position_3d_m": [1.0, 2.0, 0.1],
+            "position_glb_m": [1.1, 2.1, 0.0],
+        }],
+        "reconstruction": {
+            "status": "multi_view_rgbd_fusion",
+            "glb_registration": "registered",
+        },
+    }
+    result = namespace["build_downstream_wall_scene"](scene, "3d")
+    assert result["analysis_mode"] == "3d"
+    assert result["holds"][0]["position_3d_m"] == [1.0, 2.0, 0.1]
+    assert result["holds"][0]["position_glb_m"] == [1.1, 2.1, 0.0]
+    assert result["spatial_status"] == "glb_registered"
 
 
 def test_bootstrap_and_sam_setup_never_import_kernel_torch():
