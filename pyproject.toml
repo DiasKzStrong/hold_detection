@@ -15,7 +15,7 @@ dependencies = [
   "trimesh>=4.10,<6",
   "torch==2.7.1",
   "torchvision==0.22.1",
-  "ultralytics==8.3.249",
+  "ultralytics==8.4.207",
 ]
 
 [project.optional-dependencies]

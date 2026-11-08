@@ -16,10 +16,8 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def training_module():
-    spec = importlib.util.spec_from_file_location("yolo_training", ROOT / "scripts/train_yolo26.py")
-    module = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(module)
-    return module
+    from hold_detection import yolo_training
+    return yolo_training
 
 
 def export_fixture(root):
@@ -95,7 +93,9 @@ def test_yolo_notebook_and_hpc_script_share_readable_implementation(monkeypatch)
             ast.parse(cell.source)
             assert not cell.outputs and cell.execution_count is None
     assert json.loads(notebook_path.read_text()) == builder.build_yolo_training_notebook()
-    assert (ROOT / "scripts/train_yolo26.py").read_text() == builder.build_training_script()
+    entrypoint = (ROOT / "scripts/train_yolo26.py").read_text()
+    assert "from hold_detection.yolo_training import main" in entrypoint
+    assert "def train_yolo26" not in entrypoint
 
 
 @pytest.mark.parametrize("worker_status,paused,expected", [(0, False, 0), (7, False, 7), (1, True, 75)])

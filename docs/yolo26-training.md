@@ -1,9 +1,9 @@
 # YOLO26m training from HoldClassificatore
 
 [Open the notebook in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_YOLO26_Training.ipynb).
-The notebook shows data validation and training functions. The same code is generated into
-`scripts/train_yolo26.py` for HPC. Edit `scripts/build_yolo_training_notebook.py`, then run
-`python scripts/build_yolo_training_notebook.py` to regenerate both artifacts.
+Functions live in `src/hold_detection/yolo_training.py`. The notebook and
+`scripts/train_yolo26.py` are thin clients. The notebook builder generates only notebook UI,
+never Python implementation files. See [the complete wall pipeline](wall-pipeline.md).
 
 ## Dataset and model
 
@@ -11,8 +11,8 @@ Use [HoldClassificatore_v3_mix](https://universe.roboflow.com/climbing-holds-cla
 or [v2.2](https://universe.roboflow.com/climbing-holds-classification/holdclassificatore_v2.2).
 Select a published dataset version and export YOLO **object detection**. YOLOv5 PyTorch / YOLOv8
 exports contain `data.yaml`, split image folders and normalized bounding-box TXT labels; YOLO26
-accepts this format directly. The notebook supports a Drive ZIP/folder and a direct Roboflow
-API download with a hidden key. No training data or credentials are committed.
+accepts this format directly. The notebook accepts a Drive ZIP/folder. Direct download uses
+`holds download-yolo`, with ROBOFLOW_API_KEY from the environment. No credentials are committed.
 
 The default is `yolo26m.pt`, fine-tuned for crimp, jug, pinch, pocket, sloper and volume.
 The code preserves the export's class-ID order and normalizes `Slope` to `sloper`.
@@ -34,7 +34,7 @@ generalization; keep our Polycam captures outside training for a separate evalua
 
 1. Select a GPU runtime and run setup. A separate Python 3.12 environment uses
    `ultralytics==8.4.207`; the SAM runtime stays in its own WORK directory.
-2. Download a versioned YOLO export to Drive, or use the notebook's hidden Roboflow key input.
+2. Download a versioned YOLO export to Drive and set DATASET_SOURCE.
 3. Run dataset preparation and inspect class counts and warnings.
 4. Start with `EPOCHS=3`, `IMAGE_SIZE=1024`, `BATCH_SIZE=8` as a smoke run.
 5. For the full experiment, choose a **new run directory**, set `EPOCHS=100`, then train.
@@ -73,11 +73,18 @@ export DEMO_RUN=/scratch/NetID/hold-runs/yolo26m-1024-seed42
 sbatch scripts/slurm/yolo26-prepare.sbatch
 # After the CPU preparation job completes successfully:
 sbatch scripts/slurm/yolo26-a1002.sbatch
+# After training completes:
+sbatch scripts/slurm/yolo26-evaluate.sbatch
 ```
 
 The CPU job uses `n2c48m24`. The GPU job uses account `csci_ga_2271-2026fa`, partition
 `c24m170-a100-2`, two A100s and global batch 32 (16 per GPU). It uses native torchrun
 so all ranks execute the same checkpoint callbacks. These templates have not been submitted.
+
+For direct download on the CPU node, choose a nonexistent ZIP at DEMO_SOURCE and set
+DEMO_ROBOFLOW_VERSION to the published version number plus ROBOFLOW_API_KEY in the environment.
+The preparation job downloads, validates and prepares the export, then caches the initialization
+checkpoint. No manual conversion or dataset upload from a laptop is needed.
 
 Checkpoints are saved after every completed epoch. USR1/TERM requests a pause; once
 `last.pt` exists, all ranks stop together at the next batch callback. The unfinished epoch is

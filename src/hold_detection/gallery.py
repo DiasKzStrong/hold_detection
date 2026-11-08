@@ -37,6 +37,8 @@ def build_gallery(run: Path) -> Path:
         details = []
         for hold in frame["holds"]:
             label = hold["object_kind"]
+            if hold.get("hold_type"):
+                label += " · " + hold["hold_type"]
             score_text = f'detection score {hold["detector_score"]:.2f}'
             reasons = ", ".join(hold["review_reasons"])
             review = " · REVIEW: " + reasons if reasons else ""

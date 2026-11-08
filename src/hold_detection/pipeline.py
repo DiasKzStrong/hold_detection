@@ -81,13 +81,18 @@ def make_hold_record(detection, index, scores, minimum_score, mask_info=None,
 def run_inference(source: Path, output: Path, detector, classifier=None, segmenter=None,
                   confidence=0.35, minimum_type_score=0.5, iou=0.5, imgsz=1024,
                   tile_size=0, overlap=0.25, max_det=500, rotate=0, limit=None,
-                  model_metadata=None, infer_grip_types=False) -> dict:
+                  model_metadata=None, infer_grip_types=False, start=0, finalize=True) -> dict:
     validate_image_source(source)
     if source.is_dir() and output.resolve().is_relative_to(source.resolve()):
         raise ValueError("Output must be outside the input image directory")
     images = collect_images(source)
+    if start < 0:
+        raise ValueError("Frame start must be nonnegative")
+    images = images[start:]
     if limit is not None:
         images = images[:limit]
+    if not images:
+        raise ValueError("Selected frame range is empty")
     # Never silently overwrite a previous run or user files.
     output.mkdir(parents=True, exist_ok=False)
     frames = []
@@ -208,8 +213,9 @@ def run_inference(source: Path, output: Path, detector, classifier=None, segment
         "evaluation": "Unlabeled inference; hold recall, mask quality and route accuracy have not been measured.",
     }
     (output / "summary.json").write_text(json.dumps(summary, indent=2, allow_nan=False) + "\n")
-    from .scene import build_scene
-    build_scene(output)
-    from .gallery import build_gallery
-    build_gallery(output)
+    if finalize:
+        from .scene import build_scene
+        build_scene(output)
+        from .gallery import build_gallery
+        build_gallery(output)
     return summary

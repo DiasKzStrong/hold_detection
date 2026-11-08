@@ -24,6 +24,8 @@ def positive(value):
 def parser():
     root = argparse.ArgumentParser(description="DeMoSearch climbing hold perception")
     commands = root.add_subparsers(dest="command", required=True)
+    from .wall_commands import add_wall_commands
+    add_wall_commands(commands)
     fetch = commands.add_parser(
         "fetch-models", help="Download verified reference checkpoints"
     )
@@ -231,6 +233,9 @@ def parser():
     sam.add_argument("--max-det", type=positive, default=500)
     sam.add_argument("--rotate", type=int, choices=(0, 90, 180, 270), default=0)
     sam.add_argument("--limit", type=positive)
+    for command in (sam, predict):
+        command.add_argument("--start", type=int, default=0)
+        command.add_argument("--no-finalize", action="store_true", help="Save a resumable frame batch without scene/gallery generation")
     sam.set_defaults(overlap=0.25, imgsz=1008, tile_size=None, sam2_checkpoint=None)
     return root
 
@@ -239,6 +244,10 @@ def main(argv=None):
     root = parser()
     args = root.parse_args(argv)
     try:
+        from .wall_commands import dispatch_wall_command
+        handled = dispatch_wall_command(args)
+        if handled is not None:
+            return handled
         if args.command == "fetch-models":
             from .assets import ASSETS, download_asset
 
@@ -484,6 +493,8 @@ def main(argv=None):
                 limit=args.limit,
                 model_metadata=metadata,
                 infer_grip_types=args.classifier != "none",
+                start=args.start,
+                finalize=not args.no_finalize,
             )
             print(f"Saved {summary['frame_count']} frames to {args.output}")
             print(f"View results: {args.output / 'index.html'}")

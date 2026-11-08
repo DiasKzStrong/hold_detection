@@ -93,7 +93,7 @@ def prepare_runtime(work: Path, project: Path, sam3=False, accelerator="auto", t
     print(f"Preparing isolated Python 3.12 · {flavor}; first installation may take several minutes.")
     run_logged([*install, *TORCH_PACKAGES, "--index-url", index],
                project, work / "logs/install_torch.log", extra_env=tool_env)
-    common = ["numpy==1.26.4", "opencv-python==4.11.0.86", "ultralytics==8.3.249",
+    common = ["numpy==1.26.4", "opencv-python==4.11.0.86", "ultralytics==8.4.207",
               "pycocotools==2.0.11", "pillow>=11,<13", "matplotlib>=3.8,<4",
               "scipy>=1.14,<2", "trimesh>=4.10,<6"]
     run_logged([*install, *TORCH_PACKAGES, *common], project,

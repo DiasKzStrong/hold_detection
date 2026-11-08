@@ -1,5 +1,13 @@
 # DeMoSearch climbing wall perception
 
+The complete pipeline now has ordinary Python functions and CLI commands for **2D single-photo**
+and **3D photos/video** input. It combines SAM3 masks, optional trained YOLO26 grip types,
+COLMAP reconstruction and multiview mapping into the same `scene.json` schema.
+See [wall pipeline and SLURM commands](docs/wall-pipeline.md).
+[Open the wall-analysis notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Wall_Analysis.ipynb).
+
+The reference comparison described below remains available as a legacy baseline.
+
 A research pipeline for finding climbing holds and volumes, proposing routes
 from mask colors, and preparing observations for multi-view 3D association. It
 uses the trained YOLO11s checkpoint from
@@ -45,7 +53,7 @@ Regenerate the notebook after notebook edits with
 [Open YOLO26 training in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_YOLO26_Training.ipynb).
 Train the six-class RGB hold-type detector on a HoldClassificatore YOLO export,
 with dataset checks, validation reports and resumable checkpoints. The same visible
-notebook code is exported for two-A100 NYU Cloud Bursting jobs.
+Python library functions also run in two-A100 NYU Cloud Bursting jobs.
 See [training and HPC instructions](docs/yolo26-training.md).
 
 ## Other grip-classifier experiments

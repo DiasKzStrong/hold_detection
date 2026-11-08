@@ -1,0 +1,166 @@
+# Wall perception: Python modules, CLI and SLURM
+
+| Module under src/hold_detection | Responsibility |
+| --- | --- |
+| yolo_training.py | Roboflow download, dataset validation, YOLO26 training/evaluation |
+| capture.py | Oriented and bounded frames from one photo, photos/ZIP or video |
+| reconstruction.py | CUDA COLMAP SfM/MVS, camera/depth parsing, scale and trimesh GLB export |
+| wall_pipeline.py | Resumable per-frame SAM3 subprocesses and YOLO type assignment |
+| wall_scene.py | Multiview fusion, spatial estimates and common scene.json export |
+| correspondence.py | Matching to named annotated GLB holds with explicit frame alignment |
+| wall_commands.py | CLI arguments for these functions |
+
+Notebooks are optional clients. The notebook builders generate only UI, never application Python.
+`scripts/train_yolo26.py` is a thin library entry point.
+[Wall analysis in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Wall_Analysis.ipynb).
+The older SAM3 comparison notebook remains the legacy YOLO11/Polycam comparison.
+
+## Input and output
+
+2D accepts exactly one photo and exports masks, IDs, normalized 2D centers/sizes, color groups
+and optional six-class RGB type proposals. 3D accepts ordinary overlapping photos or a video,
+constructs a local wall through COLMAP, segments registered **undistorted images** and lifts masks
+using their stereo depth maps. Repeated evidence is fused through color consistency and 3D
+sample overlap. Single-view and unmapped holds remain in the output for review.
+
+Both modes return schema 3.0 `scene.json` with identical hold keys; `wall_scene.json` is an
+identical compatibility copy. No route planner is included. Image coordinates have top-left
+origin, x right and y down. COLMAP world orientation is arbitrary, with `up_axis=null`.
+
+```text
+RUN/capture/capture.json
+RUN/reconstruction/reconstruction.json   # 3D only
+RUN/reconstruction/wall.glb              # 3D only
+RUN/frame_batches/frame_00000/...        # completed model subprocess checkpoints
+RUN/inference/index.html                # mask/color/type review gallery
+RUN/inference/FRAME/holds.json
+RUN/logs/sam3_00000.log
+RUN/scene.json
+```
+
+SAM3 uses a fresh process for each frame to release accumulated CPU/GPU memory. Prepared
+images have a maximum edge of 1600px; video/photos are sampled to at most 48 frames by default.
+Fewer than three overlapping views are rejected in 3D mode. More views, parallax and sharp
+images are needed for a useful reconstruction; three views are only a minimum input check.
+
+## Runtime
+
+Use Python 3.12 with CUDA Torch 2.7.1 / torchvision 0.22.1, ultralytics 8.4.207, the project
+and pinned official SAM3 dependencies from [SAM3 setup](sam3.md). The notebook runtime helper
+can prepare this Python environment. HPC can use an existing CUDA Python or container wrapper;
+see [NYU runtime setup](nyu-hpc.md). Do not replace its CUDA wheels with the root CPU uv lock.
+
+3D also requires a **CUDA-enabled COLMAP executable** inside that same environment/container.
+Set DEMO_COLMAP if it is outside PATH. Installing pycolmap alone does not supply this CLI.
+Consult [COLMAP installation](https://colmap.github.io/install.html) and
+[CLI documentation](https://colmap.github.io/cli.html). Check `colmap automatic_reconstructor -h`
+before a full run. Headless jobs set `QT_QPA_PLATFORM=offscreen`; no unverified cluster module
+name is assumed. Download approved SAM3 weights before inference and train the YOLO checkpoint
+separately. No GPU job has been submitted by the development agent.
+
+## One CLI command
+
+```bash
+holds analyze-wall /path/to/wall.jpg --mode 2d --output runs/photo_demo \
+  --sam-weights models/sam3/sam3.pt --type-weights /path/to/yolo26/weights/best.pt
+
+holds analyze-wall /path/to/wall.mov --mode 3d --output runs/video_demo \
+  --sam-weights models/sam3/sam3.pt --type-weights /path/to/yolo26/weights/best.pt
+```
+
+The YOLO checkpoint is optional while training is pending. Without it, types need review.
+Low-confidence RGB proposals are retained separately. Joint detection/class scores are not a
+six-class probability distribution. Undercling, sidepull and opening direction require additional
+annotations; the six-class model cannot predict classes that are absent from its training labels.
+
+## SLURM workflow
+
+CPU stages use n2c48m24; GPU stages request c24m170-a100-2 / two A100s, all under
+csci_ga_2271-2026fa. SAM3/COLMAP currently use GPU 0; YOLO training uses both GPUs through
+torchrun. Scripts retain `--requeue` and persistent checkpoints.
+
+```bash
+export DEMO_PROJECT=/scratch/NetID/hold_detection
+export DEMO_PYTHON=/scratch/NetID/runtime/bin/python
+export DEMO_SOURCE=/scratch/NetID/captures/wall.mov
+export DEMO_RUN=/scratch/NetID/hold-runs/wallC_video
+export DEMO_MODE=3d
+export DEMO_SAM_WEIGHTS=/scratch/NetID/models/sam3/sam3.pt
+export DEMO_TYPE_WEIGHTS=/scratch/NetID/hold-runs/yolo26m/weights/best.pt
+export DEMO_COLMAP=/path/to/cuda-colmap/bin/colmap
+
+# Option A: one job executes all stages.
+DEMO_STAGE=analyze sbatch scripts/slurm/wall-gpu.sbatch
+
+# Option B: CPU/GPU jobs with afterok dependencies.
+bash scripts/slurm/submit_wall.sh
+```
+
+Choose one submission method for each run. In 2D use DEMO_MODE=2d and one photo as DEMO_SOURCE;
+the chain is prepare → segment → export. In 3D it is prepare → reconstruct → segment → export.
+Resubmitting the same run reuses completed stages/frames. Changed input/models require a new run.
+Interrupted frame folders are preserved as frame_batches/incomplete_* before retry.
+COLMAP reuses its database/workspace; an interrupted SfM stage may need to run again.
+
+Individual stages also work:
+
+```bash
+DEMO_STAGE=prepare sbatch scripts/slurm/wall-cpu.sbatch
+DEMO_STAGE=reconstruct sbatch scripts/slurm/wall-gpu.sbatch
+DEMO_STAGE=segment sbatch scripts/slurm/wall-gpu.sbatch
+DEMO_STAGE=export sbatch scripts/slurm/wall-cpu.sbatch
+```
+
+Run them in order or use dependencies. Do not allow concurrent writers to the same DEMO_RUN.
+For a network-enabled CPU node, `DEMO_STAGE=fetch-sam3 sbatch scripts/slurm/wall-cpu.sbatch`
+downloads the gated checkpoint using HF_TOKEN from the environment. No credentials are printed.
+USR1 requests a pause between SAM3 frames. Exit 75 means paused; optional DEMO_AUTO_REQUEUE=1
+requeues that job. Otherwise resubmit the chain to reuse completed outputs.
+
+## Metric scale and review fields
+
+Without a known scale, position_3d is in arbitrary units. Metric positions/sizes/protrusion and
+volumes remain null. Set DEMO_SCALE_M_PER_UNIT / --scale-m-per-unit if calibration provides a
+factor. Alternatively supply DEMO_SCALE_REFERENCE / --scale-reference containing two pixels
+on an **undistorted** image and their known physical distance:
+
+```json
+{"image":"frame_00000.jpg","point_a_px":[200,400],"point_b_px":[600,400],"distance_m":0.5}
+```
+
+Both pixels need valid depth. This calibrates length, not gravity or wall orientation.
+Do not substitute original distorted-image coordinates. aabb_volume_m3 is an approximate
+bounding-box volume, not actual hold volume. Grip area, true volume, edge depth and hold-facing
+normal stay null. Local wall normals and protrusion are reviewable estimates from visible data.
+Occluded lips/openings cannot be recovered as measured facts from an incomplete mesh.
+
+Human edits are a JSON map keyed by stable hold ID:
+
+```json
+{"hold_a1b2c3d4e5f6":{"hold_type":"undercling","opening_direction":"down","is_start":true,"route_ids":["blue_v5"]}}
+```
+
+Set DEMO_ANNOTATIONS and rerun only export, or pass --annotations-path to holds export-wall.
+Semantic edits do not overwrite geometry. Unknown types require an explicit downstream cost
+policy or human confirmation for a reviewed demo.
+
+## Annotated GLB matching
+
+Mesh anchors in scene.json describe the nearest reconstructed vertex, not a semantic ground-truth
+hold identity. For blue V5/yellow V3 use an explicit transform from reconstruction units to the
+annotated GLB's meter frame. Named hold/volume objects are matched one-to-one within a distance
+gate, with unmatched holds retained:
+
+```bash
+holds match-annotated-glb runs/video_demo/scene.json \
+  --annotated-glb /path/to/wallC_blueV5_marked.glb \
+  --transform /path/to/scene_to_annotated.json --output runs/video_demo/scene_matched.json
+```
+
+On HPC set DEMO_ANNOTATED_GLB and DEMO_ANNOTATION_TRANSFORM, then run
+`DEMO_STAGE=match sbatch scripts/slurm/wall-cpu.sbatch`. Independent COLMAP/Polycam frames must
+be aligned before this step. Identity is valid only when their coordinate frames already agree.
+
+The new workflow is checked with synthetic images/video, calibrated depth examples, real mesh
+serialization and an external COLMAP-process fixture. Real photo/video reconstruction quality
+and a full SAM3/YOLO26 wall GPU run have not yet been validated on this development machine.
