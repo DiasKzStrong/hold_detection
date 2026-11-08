@@ -40,10 +40,17 @@ Actual SAM GPU inference has not been validated on this CPU-only development mac
 Regenerate the notebook after notebook edits with
 `python scripts/build_colab_notebook.py`; it never embeds photos, weights or tokens.
 
-## Legacy grip-classifier research
+## YOLO26m training
 
-Grip classification is outside the current route/spatial pipeline. The preserved
-legacy experiment supports **ImageNet ResNet18 fine-tuning** and **frozen SigLIP +
+[Open YOLO26 training in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_YOLO26_Training.ipynb).
+Train the six-class RGB hold-type detector on a HoldClassificatore YOLO export,
+with dataset checks, validation reports and resumable checkpoints. The same visible
+notebook code is exported for two-A100 NYU Cloud Bursting jobs.
+See [training and HPC instructions](docs/yolo26-training.md).
+
+## Other grip-classifier experiments
+
+The earlier crop-classification experiment supports **ImageNet ResNet18 fine-tuning** and **frozen SigLIP +
 linear head**, with labeled YOLO/COCO crop preparation, cached embeddings,
 validation-selected checkpoints, restart and test reports. Artifacts plug into
 SAM 3 using `--classifier trained --classifier-weights /path/to/best.pt`.

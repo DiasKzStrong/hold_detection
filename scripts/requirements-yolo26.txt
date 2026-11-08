@@ -1,0 +1,7 @@
+# Install matching CUDA torch/torchvision first on HPC; do not root uv sync there.
+ultralytics==8.4.207
+numpy==1.26.4
+opencv-python==4.11.0.86
+PyYAML==6.0.3
+Pillow>=11,<13
+cloudpickle==3.1.2
