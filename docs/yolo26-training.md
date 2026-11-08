@@ -1,9 +1,9 @@
 # YOLO26m training from HoldClassificatore
 
-[Open the notebook in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_YOLO26_Training.ipynb).
-Functions live in `src/hold_detection/yolo_training.py`. The notebook and
-`scripts/train_yolo26.py` are thin clients. The notebook builder generates only notebook UI,
-never Python implementation files. See [the complete wall pipeline](wall-pipeline.md).
+Functions live in `src/hold_detection/yolo_training.py`, with `scripts/train_yolo26.py`
+as the Python entry point and SLURM jobs below. Training is separate from the
+[inference-only notebook](../notebooks/DeMoSearch_Pipeline.ipynb), which uses existing checkpoints.
+See [the complete wall pipeline](wall-pipeline.md).
 
 ## Dataset and model
 
@@ -11,7 +11,7 @@ Use [HoldClassificatore_v3_mix](https://universe.roboflow.com/climbing-holds-cla
 or [v2.2](https://universe.roboflow.com/climbing-holds-classification/holdclassificatore_v2.2).
 Select a published dataset version and export YOLO **object detection**. YOLOv5 PyTorch / YOLOv8
 exports contain `data.yaml`, split image folders and normalized bounding-box TXT labels; YOLO26
-accepts this format directly. The notebook accepts a Drive ZIP/folder. Direct download uses
+accepts this format directly. Preparation accepts a local ZIP/folder. Direct download uses
 `holds download-yolo`, with ROBOFLOW_API_KEY from the environment. No credentials are committed.
 
 The default is `yolo26m.pt`, fine-tuned for crimp, jug, pinch, pocket, sloper and volume.
@@ -30,16 +30,21 @@ This dataset shares sources with the legacy checkpoint's training data. Pixel ha
 detect resizes/mirrors or neighboring frames. Audit physical wall/session groups before claiming
 generalization; keep our Polycam captures outside training for a separate evaluation.
 
-## Colab
+## Python entry point
 
-1. Select a GPU runtime and run setup. A separate Python 3.12 environment uses
-   `ultralytics==8.4.207`; the SAM runtime stays in its own WORK directory.
-2. Download a versioned YOLO export to Drive and set DATASET_SOURCE.
-3. Run dataset preparation and inspect class counts and warnings.
-4. Start with `EPOCHS=3`, `IMAGE_SIZE=1024`, `BATCH_SIZE=8` as a smoke run.
-5. For the full experiment, choose a **new run directory**, set `EPOCHS=100`, then train.
-   A completed three-epoch run is not an interrupted 100-epoch run to resume.
-6. Validate `best.pt`. Enable test evaluation only after selecting the configuration.
+Run training from a configured CUDA environment or use the SLURM jobs below:
+
+```bash
+python scripts/train_yolo26.py prepare /path/to/HoldClassificatore.zip --output data/hold-types
+python scripts/train_yolo26.py train --data data/hold-types/data.yaml --output runs/yolo26m_smoke \
+  --model yolo26m.pt --epochs 3 --imgsz 1024 --batch 8 --device 0
+python scripts/train_yolo26.py evaluate --data data/hold-types/data.yaml --output runs/yolo26m_smoke \
+  --split val --device 0
+```
+
+For a full experiment, use a new run directory and 100 epochs. Resume applies to an interrupted
+run with the original epoch budget, not an already completed three-epoch smoke run. Use the test
+split only after selecting the configuration. Pass the resulting best.pt to the inference notebook.
 
 Outputs include `weights/best.pt`, `weights/last.pt`, per-epoch checkpoints,
 `training_manifest.json`, `results.csv`, plots and `metrics_val.json` / optional `metrics_test.json`.

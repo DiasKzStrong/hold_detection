@@ -4,7 +4,8 @@ The complete pipeline now has ordinary Python functions and CLI commands for **2
 and **3D photos/video** input. It combines SAM3 masks, optional trained YOLO26 grip types,
 COLMAP reconstruction and multiview mapping into the same `scene.json` schema.
 See [wall pipeline and SLURM commands](docs/wall-pipeline.md).
-[Open the wall-analysis notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Wall_Analysis.ipynb).
+[Open the complete inference notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Pipeline.ipynb).
+It tests 2D/3D analysis with existing checkpoints and contains no model-training steps.
 
 The reference comparison described below remains available as a legacy baseline.
 
@@ -50,10 +51,9 @@ Regenerate the notebook after notebook edits with
 
 ## YOLO26m training
 
-[Open YOLO26 training in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_YOLO26_Training.ipynb).
 Train the six-class RGB hold-type detector on a HoldClassificatore YOLO export,
-with dataset checks, validation reports and resumable checkpoints. The same visible
-Python library functions also run in two-A100 NYU Cloud Bursting jobs.
+with dataset checks, validation reports and resumable checkpoints. Training runs through
+`scripts/train_yolo26.py` or two-A100 NYU Cloud Bursting jobs, separately from the inference notebook.
 See [training and HPC instructions](docs/yolo26-training.md).
 
 ## Other grip-classifier experiments

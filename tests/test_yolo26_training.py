@@ -1,7 +1,6 @@
 """Exercise the notebook's dataset hand-off with real files, without a GPU."""
 
 import ast
-import importlib.util
 import json
 import os
 from pathlib import Path
@@ -80,19 +79,18 @@ def test_prepare_supports_nested_zip_and_rejects_path_traversal(tmp_path):
     assert not (tmp_path / "escape.txt").exists()
 
 
-def test_yolo_notebook_and_hpc_script_share_readable_implementation(monkeypatch):
-    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
-    spec = importlib.util.spec_from_file_location("yolo_builder", ROOT / "scripts/build_yolo_training_notebook.py")
-    builder = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(builder)
-    notebook_path = ROOT / "notebooks/DeMoSearch_YOLO26_Training.ipynb"
+def test_pipeline_notebook_uses_ready_models_without_training_commands():
+    notebook_path = ROOT / "notebooks/DeMoSearch_Pipeline.ipynb"
     notebook = nbformat.read(notebook_path, as_version=4)
     nbformat.validate(notebook)
     for cell in notebook.cells:
         if cell.cell_type == "code":
             ast.parse(cell.source)
             assert not cell.outputs and cell.execution_count is None
-    assert json.loads(notebook_path.read_text()) == builder.build_yolo_training_notebook()
+    executable = "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "code")
+    for command in ["train-yolo", "prepare-yolo", "download-yolo", "evaluate-yolo"]:
+        assert command not in executable
+    assert "segment-capture" in executable and "export-wall" in executable
     entrypoint = (ROOT / "scripts/train_yolo26.py").read_text()
     assert "from hold_detection.yolo_training import main" in entrypoint
     assert "def train_yolo26" not in entrypoint

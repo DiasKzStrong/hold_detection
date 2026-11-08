@@ -10,9 +10,10 @@
 | correspondence.py | Matching to named annotated GLB holds with explicit frame alignment |
 | wall_commands.py | CLI arguments for these functions |
 
-Notebooks are optional clients. The notebook builders generate only UI, never application Python.
+Notebooks are optional inference clients. The complete inference notebook is edited directly
+as an .ipynb and uses existing SAM3/hold-type checkpoints; it contains no training steps.
 `scripts/train_yolo26.py` is a thin library entry point.
-[Wall analysis in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Wall_Analysis.ipynb).
+[Complete inference in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Pipeline.ipynb).
 The older SAM3 comparison notebook remains the legacy YOLO11/Polycam comparison.
 
 ## Input and output
