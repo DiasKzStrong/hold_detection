@@ -16,6 +16,13 @@ as an .ipynb and uses existing SAM3/hold-type checkpoints; it contains no traini
 [Complete inference in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Pipeline.ipynb).
 The older SAM3 comparison notebook remains the legacy YOLO11/Polycam comparison.
 
+The inference notebook has separate `INPUT_PATH_2D` and `INPUT_PATH_3D` settings.
+The default 3D preset stages 15 overlapping RGB keyframes of the Blue V5 section
+from `wallC_raw_data.zip`. For a new wall section, point `INPUT_PATH_3D` to its own
+photo folder, ZIP, or video. The notebook can show saved masks next to each photo,
+color them by type or group, and display the generated GLB with hold markers.
+The same review ID identifies a hold on the mesh and in its supporting frames.
+
 ## Input and output
 
 2D accepts exactly one photo (including iPhone HEIC) and exports masks, IDs, normalized 2D centers/sizes, color groups
