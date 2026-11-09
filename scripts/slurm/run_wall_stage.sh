@@ -27,7 +27,9 @@ scale=()
 if [[ -n "${DEMO_SCALE_M_PER_UNIT:-}" ]]; then scale=(--scale-m-per-unit "${DEMO_SCALE_M_PER_UNIT}"); fi
 if [[ -n "${DEMO_SCALE_REFERENCE:-}" ]]; then scale+=(--scale-reference "${DEMO_SCALE_REFERENCE}"); fi
 types=()
-if [[ -n "${DEMO_TYPE_WEIGHTS:-}" ]]; then types=(--type-weights "${DEMO_TYPE_WEIGHTS}"); fi
+if [[ -n "${DEMO_TYPE_WEIGHTS:-}" ]]; then
+  types=(--type-weights "${DEMO_TYPE_WEIGHTS}" --type-imgsz "${DEMO_TYPE_IMGSZ:-1024}")
+fi
 annotations=()
 if [[ -n "${DEMO_ANNOTATIONS:-}" ]]; then annotations=(--annotations-path "${DEMO_ANNOTATIONS}"); fi
 case "${DEMO_STAGE}" in

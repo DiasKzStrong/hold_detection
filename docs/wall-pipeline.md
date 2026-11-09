@@ -70,6 +70,9 @@ holds analyze-wall /path/to/wall.mov --mode 3d --output runs/video_demo \
 ```
 
 The YOLO checkpoint is optional while training is pending. Without it, types need review.
+For a six-class Roboflow `.pt` trained at 640px, pass `--type-imgsz 640` to
+`analyze-wall` or `segment-capture`. The inference notebook exposes the same size
+as `TYPE_IMGSZ` and can preview the checkpoint on one photo with `RUN_YOLO_PREVIEW`.
 Low-confidence RGB proposals are retained separately. Joint detection/class scores are not a
 six-class probability distribution. Undercling, sidepull and opening direction require additional
 annotations; the six-class model cannot predict classes that are absent from its training labels.
@@ -88,6 +91,8 @@ export DEMO_RUN=/scratch/NetID/hold-runs/wallC_video
 export DEMO_MODE=3d
 export DEMO_SAM_WEIGHTS=/scratch/NetID/models/sam3/sam3.pt
 export DEMO_TYPE_WEIGHTS=/scratch/NetID/hold-runs/yolo26m/weights/best.pt
+# Optional, e.g. 640 for a 640px Roboflow checkpoint.
+# export DEMO_TYPE_IMGSZ=640
 export DEMO_COLMAP=/path/to/cuda-colmap/bin/colmap
 
 # Option A: one job executes all stages.

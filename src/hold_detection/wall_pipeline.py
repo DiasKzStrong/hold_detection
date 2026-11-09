@@ -18,7 +18,7 @@ class PipelinePaused(Exception):
 
 
 def segment_capture(capture, run, reconstruction_path=None, sam_weights=None, type_weights=None,
-                    device="0", confidence=0.5, stop_file=None):
+                    device="0", confidence=0.5, stop_file=None, type_imgsz=1024):
     """Run class-agnostic SAM3, one frame per process, then attach YOLO26 RGB type proposals."""
     capture, run = Path(capture).resolve(), Path(run).resolve()
     manifest = json.loads((capture / "capture.json").read_text())
@@ -31,13 +31,20 @@ def segment_capture(capture, run, reconstruction_path=None, sam_weights=None, ty
         raise FileNotFoundError(f"Missing SAM3 checkpoint: {weights}; run holds fetch-sam3 first")
     if type_weights and not Path(type_weights).is_file():
         raise FileNotFoundError(type_weights)
+    if type_weights and type_imgsz <= 0:
+        raise ValueError("Hold-type inference image size must be positive")
     settings = {"capture": manifest["settings"], "source": str(source), "confidence": confidence,
                 "sam_sha256": sha256(weights),
-                "type_sha256": sha256(Path(type_weights)) if type_weights else None}
+                "type_sha256": sha256(Path(type_weights)) if type_weights else None,
+                "type_imgsz": type_imgsz if type_weights else None}
     run.mkdir(parents=True, exist_ok=True)
     specification = run / "analysis_settings.json"
-    if specification.exists() and json.loads(specification.read_text()) != settings:
-        raise ValueError("Analysis input/models/settings changed; choose another run directory")
+    if specification.exists():
+        previous = json.loads(specification.read_text())
+        # Runs created before this option used 1024 for every hold-type checkpoint.
+        previous.setdefault("type_imgsz", 1024 if previous["type_sha256"] else None)
+        if previous != settings:
+            raise ValueError("Analysis input/models/settings changed; choose another run directory")
     specification.write_text(json.dumps(settings, indent=2) + "\n")
     inference = run / "inference"
     inference.mkdir(exist_ok=True)
@@ -80,14 +87,14 @@ def segment_capture(capture, run, reconstruction_path=None, sam_weights=None, ty
     from .scene import build_scene
     build_scene(inference)
     if type_weights:
-        assign_run_types(inference, Path(type_weights), device)
+        assign_run_types(inference, Path(type_weights), device, imgsz=type_imgsz)
     from .gallery import build_gallery
     build_gallery(inference)
     (run / "SEGMENTATION_COMPLETE").touch()
     return str(inference)
 
 
-def assign_run_types(inference, weights, device="0"):
+def assign_run_types(inference, weights, device="0", imgsz=1024):
     """Keep SAM identities and masks; assign six-class detections through overlap."""
     from .models import HoldDetector
     from .wall_scene import assign_type_proposals
@@ -96,7 +103,7 @@ def assign_run_types(inference, weights, device="0"):
     for path in sorted(Path(inference).glob("*/holds.json")):
         frame = json.loads(path.read_text())
         with Image.open(frame["source_image"]) as image:
-            detections = detector.detect(image.convert("RGB"), confidence=0.2, imgsz=1024)
+            detections = detector.detect(image.convert("RGB"), confidence=0.2, imgsz=imgsz)
         proposals = [{"bbox_xyxy": list(d.bbox), "score": d.score, "label": d.label} for d in detections]
         frame["holds"] = assign_type_proposals(frame["holds"], proposals)
         path.write_text(json.dumps(frame, indent=2, allow_nan=False) + "\n")
@@ -104,7 +111,8 @@ def assign_run_types(inference, weights, device="0"):
 
 def analyze_wall(source, output, mode="2d", sam_weights=None, type_weights=None,
                  device="0", max_frames=48, colmap="colmap", scale_m_per_unit=None,
-                 quality="medium", annotations=None, confidence=0.5, scale_reference=None):
+                 quality="medium", annotations=None, confidence=0.5, scale_reference=None,
+                 type_imgsz=1024):
     """Run the complete photo/video workflow; resume completed preparation and reconstruction."""
     from .capture import prepare_capture
     from .reconstruction import reconstruct_wall
@@ -128,7 +136,8 @@ def analyze_wall(source, output, mode="2d", sam_weights=None, type_weights=None,
         if mode == "3d":
             reconstruct_wall(capture, output / "reconstruction", colmap, quality, scale_m_per_unit, scale_reference)
             reconstruction_path = output / "reconstruction/reconstruction.json"
-        segment_capture(capture, output, reconstruction_path, sam_weights, type_weights, device, confidence, stop)
+        segment_capture(capture, output, reconstruction_path, sam_weights, type_weights, device,
+                        confidence, stop, type_imgsz=type_imgsz)
         return export_wall_scene(output, mode, reconstruction_path, annotations)
     finally:
         for sig, handler in previous.items():

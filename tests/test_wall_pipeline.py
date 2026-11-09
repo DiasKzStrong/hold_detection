@@ -203,6 +203,7 @@ def test_annotated_glb_matching_requires_alignment_and_keeps_stable_target_ids(t
 
 
 def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(tmp_path, monkeypatch):
+    from hold_detection import models
     from hold_detection.wall_pipeline import segment_capture
     source = tmp_path / "photo.jpg"
     Image.new("RGB", (20, 20), "blue").save(source)
@@ -210,10 +211,20 @@ def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(t
     prepare_capture(source, capture)
     weights = tmp_path / "sam3.pt"
     weights.write_bytes(b'external model fixture')
+    type_weights = tmp_path / "types.pt"
+    type_weights.write_bytes(b'external hold-type model fixture')
 
     class Detector:
         def detect(self, image, **settings):
             return [Detection((2, 2, 9, 9), 0.9, "hold", label_is_type=False)]
+
+    class TypeDetector:
+        def __init__(self, weights, device):
+            assert weights == type_weights
+
+        def detect(self, image, **settings):
+            assert settings["imgsz"] == 640
+            return [Detection((2, 2, 9, 9), 0.8, "jug")]
 
     def model_process(command, **kwargs):
         assert "--no-finalize" in command and command[3] == "sam3"
@@ -222,17 +233,21 @@ def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(t
         return subprocess.CompletedProcess(command, 0)
 
     monkeypatch.setattr(subprocess, "run", model_process)
+    monkeypatch.setattr(models, "HoldDetector", TypeDetector)
     run = tmp_path / "run"
-    segment_capture(capture, run, sam_weights=weights)
+    segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=640)
     initial = export_wall_scene(run, "2d")
+    assert initial["holds"][0]["hold_type"] == "jug"
 
     def unexpected_process(*args, **kwargs):
         raise AssertionError("A completed inference frame must not run again")
 
     monkeypatch.setattr(subprocess, "run", unexpected_process)
-    segment_capture(capture, run, sam_weights=weights)
+    segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=640)
     assert export_wall_scene(run, "2d") == initial
     assert (run / "inference/index.html").is_file()
+    with pytest.raises(ValueError, match="settings changed"):
+        segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=1024)
 
 
 def test_batch_inference_can_resume_a_slice_without_finalizing(tmp_path):
