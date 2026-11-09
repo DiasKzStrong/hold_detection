@@ -101,6 +101,11 @@ The YOLO checkpoint is optional while training is pending. Without it, types nee
 For a six-class Roboflow `.pt` trained at 640px, pass `--type-imgsz 640` to
 `analyze-wall` or `segment-capture`. The inference notebook exposes the same size
 as `TYPE_IMGSZ` and can preview the checkpoint on one photo with `RUN_YOLO_PREVIEW`.
+Set `TYPE_MIN_SCORE` in the notebook segmentation cell or pass `--type-min-score`
+to change the acceptance threshold for overlapping YOLO boxes. Changing this
+threshold reuses completed SAM3 batches. `scene.json` reports unknown observations
+with no overlapping candidate, a score below the cutoff, or an eligible box left
+unmatched in the one-to-one assignment.
 Low-confidence RGB proposals are retained separately. Joint detection/class scores are not a
 six-class probability distribution. Undercling, sidepull and opening direction require additional
 annotations; the six-class model cannot predict classes that are absent from its training labels.

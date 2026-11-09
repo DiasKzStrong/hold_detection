@@ -17,7 +17,8 @@ def assign_type_proposals(holds, proposals, minimum_score=0.5, minimum_iou=0.3):
     from .geometry import box_iou
     from scipy.optimize import linear_sum_assignment
     result = [dict(hold, hold_type="unknown", hold_type_confidence=None,
-                   hold_type_source="not_inferred", type_needs_review=True, type_proposals=[],
+                   hold_type_source="not_inferred", type_needs_review=True,
+                   type_match_iou=None, type_proposals=[],
                    needs_review=True,
                    review_reasons=sorted(set(hold.get("review_reasons", [])) | {"rgb_type_requires_review"}))
               for hold in holds]
@@ -28,16 +29,32 @@ def assign_type_proposals(holds, proposals, minimum_score=0.5, minimum_iou=0.3):
         hold["type_proposals"] = [{"label": proposal["label"], "score": proposal["score"],
                                    "iou": float(overlap[row, column])}
                                   for column, proposal in enumerate(proposals) if overlap[row, column] >= minimum_iou]
-    # Low-score boxes must not steal the assignment from a viable proposal.
-    valid = overlap * np.array([p["score"] >= minimum_score for p in proposals])
+    # Gate both score and overlap before the global assignment.
+    eligible = (overlap >= minimum_iou) & np.array([p["score"] >= minimum_score for p in proposals])
+    valid = np.where(eligible, overlap, 0)
     for row, column in zip(*linear_sum_assignment(-valid)):
         proposal = proposals[column]
-        if valid[row, column] < minimum_iou:
+        if not eligible[row, column]:
             continue
         result[row].update(hold_type=proposal["label"], hold_type_confidence=proposal["score"],
                            hold_type_source="yolo26_rgb_joint_score", type_needs_review=True,
                            type_match_iou=float(overlap[row, column]))
     return result
+
+
+def _type_assignment_review(observations, minimum_score):
+    counts = {"no_overlapping_yolo_candidate": 0, "below_type_min_score": 0, "eligible_but_unmatched": 0}
+    for observation in observations:
+        if observation["hold_type"] != "unknown":
+            continue
+        proposals = observation["type_proposals"]
+        if not proposals:
+            counts["no_overlapping_yolo_candidate"] += 1
+        elif max(proposal["score"] for proposal in proposals) < minimum_score:
+            counts["below_type_min_score"] += 1
+        else:
+            counts["eligible_but_unmatched"] += 1
+    return {"minimum_score": minimum_score, "unknown_observations_by_reason": counts}
 
 
 def _observation(frame, hold):
@@ -209,6 +226,9 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
     annotations = json.loads(Path(annotations_path).read_text()) if annotations_path else None
     scene = build_wall_scene(observations, mode, reconstruction, annotations, orientation)
     scene["wall"]["input_crop"] = summary.get("input_crop")
+    if summary.get("grip_type_inference_enabled"):
+        minimum_score = summary.get("settings", {}).get("type_min_score", 0.5)
+        scene["review"]["type_assignment"] = _type_assignment_review(observations, minimum_score)
     if reconstruction:
         import trimesh
         mesh = trimesh.load(reconstruction["mesh_path"], force="mesh", process=False)

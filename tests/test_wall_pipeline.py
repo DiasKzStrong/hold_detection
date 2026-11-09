@@ -155,6 +155,14 @@ def test_sam_instances_receive_at_most_one_valid_type_proposal():
     assert len(result) == 2
 
 
+def test_below_threshold_overlaps_do_not_displace_a_valid_type_match():
+    holds = [{"bbox_xyxy": [4, 0, 14, 10]}, {"bbox_xyxy": [0, 0, 2, 10]}]
+    proposals = [{"bbox_xyxy": [0, 0, 9, 10], "score": 0.9, "label": "jug"},
+                 {"bbox_xyxy": [2, 0, 7, 10], "score": 0.9, "label": "crimp"}]
+    result = assign_type_proposals(holds, proposals)
+    assert [hold["hold_type"] for hold in result] == ["jug", "unknown"]
+
+
 def test_two_modes_share_schema_and_uncalibrated_3d_never_claims_meters():
     geometry = {"samples": [[0, 0, 2], [0.1, 0, 2], [0, 0.1, 2]],
                 "extent": [0.1, 0.1, 0], "wall_normal": [0, 0, -1], "protrusion": 0.02}
@@ -267,7 +275,7 @@ def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(t
 
         def detect(self, image, **settings):
             assert settings["imgsz"] == 640
-            return [Detection((2, 2, 9, 9), 0.8, "jug")]
+            return [Detection((2, 2, 9, 9), 0.4, "jug")]
 
     def model_process(command, **kwargs):
         assert "--no-finalize" in command and command[3] == "sam3"
@@ -280,13 +288,20 @@ def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(t
     run = tmp_path / "run"
     segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=640)
     initial = export_wall_scene(run, "2d")
-    assert initial["holds"][0]["hold_type"] == "jug"
+    assert initial["holds"][0]["hold_type"] == "unknown"
+    assert initial["review"]["type_assignment"]["unknown_observations_by_reason"]["below_type_min_score"] == 1
     assert initial["wall"]["input_crop"] == prepared["frames"][0]["input_crop"]
 
     def unexpected_process(*args, **kwargs):
         raise AssertionError("A completed inference frame must not run again")
 
     monkeypatch.setattr(subprocess, "run", unexpected_process)
+    segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=640,
+                    type_min_score=0.35)
+    retuned = export_wall_scene(run, "2d")
+    assert retuned["holds"][0]["id"] == initial["holds"][0]["id"]
+    assert retuned["holds"][0]["hold_type"] == "jug"
+    assert retuned["review"]["type_assignment"]["minimum_score"] == 0.35
     segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=640)
     assert export_wall_scene(run, "2d") == initial
     assert (run / "inference/index.html").is_file()

@@ -13,12 +13,16 @@ from .assets import sha256
 from .pipeline import collect_images
 
 
+TYPE_PROPOSAL_FLOOR = 0.2
+
+
 class PipelinePaused(Exception):
     """The current stage can be resumed from completed frame/stage artifacts."""
 
 
 def segment_capture(capture, run, reconstruction_path=None, sam_weights=None, type_weights=None,
-                    device="0", confidence=0.5, stop_file=None, type_imgsz=1024):
+                    device="0", confidence=0.5, stop_file=None, type_imgsz=1024,
+                    type_min_score=0.5):
     """Run class-agnostic SAM3, one frame per process, then attach YOLO26 RGB type proposals."""
     capture, run = Path(capture).resolve(), Path(run).resolve()
     manifest = json.loads((capture / "capture.json").read_text())
@@ -33,6 +37,8 @@ def segment_capture(capture, run, reconstruction_path=None, sam_weights=None, ty
         raise FileNotFoundError(type_weights)
     if type_weights and type_imgsz <= 0:
         raise ValueError("Hold-type inference image size must be positive")
+    if type_weights and not TYPE_PROPOSAL_FLOOR <= type_min_score <= 1:
+        raise ValueError(f"Hold-type minimum score must be between {TYPE_PROPOSAL_FLOOR} and 1")
     settings = {"capture": manifest["settings"], "source": str(source), "confidence": confidence,
                 "sam_sha256": sha256(weights),
                 "type_sha256": sha256(Path(type_weights)) if type_weights else None,
@@ -58,7 +64,8 @@ def segment_capture(capture, run, reconstruction_path=None, sam_weights=None, ty
             raise PipelinePaused("Paused between frames; completed frames will be reused")
         batch = batches / f"frame_{index:05d}"
         summary_path = batch / "summary.json"
-        if not summary_path.is_file():
+        reused = summary_path.is_file()
+        if not reused:
             if batch.exists():
                 # Preserve an interrupted frame for inspection; retry it in a fresh directory.
                 batch.rename(batches / f"incomplete_{index:05d}_{time.time_ns()}")
@@ -77,7 +84,7 @@ def segment_capture(capture, run, reconstruction_path=None, sam_weights=None, ty
             destination = inference / frame_dir.name
             if not destination.exists():
                 shutil.copytree(frame_dir, destination)
-        print(f"SAM3 {index + 1}: {image_path.name} saved", flush=True)
+        print(f"SAM3 {index + 1}: {image_path.name} {'reused' if reused else 'saved'}", flush=True)
     summaries = {"schema_version": "1.0", "frame_count": len(frame_summaries),
                  "detection_count": sum(frame["hold_count"] for frame in frame_summaries),
                  "segmentation_enabled": True,
@@ -85,18 +92,24 @@ def segment_capture(capture, run, reconstruction_path=None, sam_weights=None, ty
                  "settings": {"rotate": 0}, "models": settings}
     if manifest["settings"]["mode"] == "2d" and manifest["frames"][0].get("input_crop"):
         summaries["input_crop"] = manifest["frames"][0]["input_crop"]
-    (inference / "summary.json").write_text(json.dumps(summaries, indent=2) + "\n")
+    summary_path = inference / "summary.json"
+    completion = run / "SEGMENTATION_COMPLETE"
+    completion.unlink(missing_ok=True)
+    summary_path.unlink(missing_ok=True)
     from .scene import build_scene
     build_scene(inference)
     if type_weights:
-        assign_run_types(inference, Path(type_weights), device, imgsz=type_imgsz)
+        assign_run_types(inference, Path(type_weights), device, imgsz=type_imgsz,
+                         minimum_score=type_min_score)
+        summaries["settings"]["type_min_score"] = type_min_score
+    summary_path.write_text(json.dumps(summaries, indent=2) + "\n")
     from .gallery import build_gallery
     build_gallery(inference)
-    (run / "SEGMENTATION_COMPLETE").touch()
+    completion.touch()
     return str(inference)
 
 
-def assign_run_types(inference, weights, device="0", imgsz=1024):
+def assign_run_types(inference, weights, device="0", imgsz=1024, minimum_score=0.5):
     """Keep SAM identities and masks; assign six-class detections through overlap."""
     from .models import HoldDetector
     from .wall_scene import assign_type_proposals
@@ -105,16 +118,16 @@ def assign_run_types(inference, weights, device="0", imgsz=1024):
     for path in sorted(Path(inference).glob("*/holds.json")):
         frame = json.loads(path.read_text())
         with Image.open(frame["source_image"]) as image:
-            detections = detector.detect(image.convert("RGB"), confidence=0.2, imgsz=imgsz)
+            detections = detector.detect(image.convert("RGB"), confidence=TYPE_PROPOSAL_FLOOR, imgsz=imgsz)
         proposals = [{"bbox_xyxy": list(d.bbox), "score": d.score, "label": d.label} for d in detections]
-        frame["holds"] = assign_type_proposals(frame["holds"], proposals)
+        frame["holds"] = assign_type_proposals(frame["holds"], proposals, minimum_score=minimum_score)
         path.write_text(json.dumps(frame, indent=2, allow_nan=False) + "\n")
 
 
 def analyze_wall(source, output, mode="2d", sam_weights=None, type_weights=None,
                  device="0", max_frames=48, colmap="colmap", scale_m_per_unit=None,
                  quality="medium", annotations=None, confidence=0.5, scale_reference=None,
-                 type_imgsz=1024):
+                 type_imgsz=1024, type_min_score=0.5):
     """Run the complete photo/video workflow; resume completed preparation and reconstruction."""
     from .capture import prepare_capture
     from .reconstruction import reconstruct_wall
@@ -139,7 +152,7 @@ def analyze_wall(source, output, mode="2d", sam_weights=None, type_weights=None,
             reconstruct_wall(capture, output / "reconstruction", colmap, quality, scale_m_per_unit, scale_reference)
             reconstruction_path = output / "reconstruction/reconstruction.json"
         segment_capture(capture, output, reconstruction_path, sam_weights, type_weights, device,
-                        confidence, stop, type_imgsz=type_imgsz)
+                        confidence, stop, type_imgsz=type_imgsz, type_min_score=type_min_score)
         return export_wall_scene(output, mode, reconstruction_path, annotations)
     finally:
         for sig, handler in previous.items():
