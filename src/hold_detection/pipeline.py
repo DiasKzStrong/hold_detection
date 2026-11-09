@@ -8,10 +8,12 @@ import time
 
 import numpy as np
 from PIL import Image, ImageDraw
+from pillow_heif import register_heif_opener
 
 from .geometry import TYPES, crop_box
 
-IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff"}
+register_heif_opener(thumbnails=False)
+IMAGE_EXTENSIONS = {".jpg", ".jpeg", ".png", ".webp", ".bmp", ".tif", ".tiff", ".heic", ".heif"}
 COLORS = dict(zip(TYPES, ["#f5b041", "#58d68d", "#5dade2", "#ec7063", "#af7ac5", "#f4d03f"]))
 
 

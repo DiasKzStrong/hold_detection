@@ -70,6 +70,27 @@ def test_photo_capture_is_oriented_bounded_and_reusable(tmp_path):
         prepare_capture(photo, tmp_path / "capture", max_image_edge=120)
 
 
+def test_prepare_capture_cli_accepts_an_oriented_heic_photo(tmp_path, capsys):
+    from pillow_heif import from_pillow
+    from hold_detection.cli import main
+
+    source = tmp_path / "wall.HEIC"
+    # HEIC can store portrait-oriented pixels with a legacy EXIF orientation tag.
+    image = Image.new("RGB", (80, 120), "blue")
+    image.getexif()[274] = 6
+    from_pillow(image).save(source, exif=image.getexif().tobytes())
+
+    output = tmp_path / "capture"
+    status = main(["prepare-capture", str(source), "--mode", "2d",
+                   "--output", str(output), "--max-image-edge", "100"])
+    captured = capsys.readouterr()
+    assert status == 0, captured.err
+    manifest = json.loads(captured.out)
+    with Image.open(output / manifest["frames"][0]["path"]) as prepared:
+        assert prepared.format == "JPEG"
+        assert prepared.size == (67, 100)
+
+
 def test_video_capture_extracts_multiple_views_without_a_glb(tmp_path):
     import cv2
     video = tmp_path / "wall.avi"

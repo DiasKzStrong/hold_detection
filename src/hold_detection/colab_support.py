@@ -35,7 +35,7 @@ def prepare_inputs(paths: list[Path], workspace: Path) -> PreparedInput:
     Extract/copy operations require a fresh destination and retain the originals.
     """
     if not paths or any(not p.exists() for p in paths):
-        raise ValueError("Select existing JPEG/PNG photos, a photo directory, or a raw-data ZIP")
+        raise ValueError("Select existing RGB photos, a photo directory, or a raw-data ZIP")
     if len(paths) == 1 and paths[0].is_dir():
         wall_directory = paths[0]
         if any("raw_data" in path.name.lower() for path in wall_directory.iterdir()):
@@ -75,7 +75,7 @@ def prepare_inputs(paths: list[Path], workspace: Path) -> PreparedInput:
                             and not PurePosixPath(n).name.startswith("._")]
                 kind = "photos"
             if not selected:
-                raise ValueError("No supported RGB photos in ZIP; use JPEG or PNG")
+                raise ValueError("No supported RGB photos in ZIP; use JPEG, PNG or HEIC")
             workspace.mkdir(parents=True, exist_ok=False)
             for name in selected:
                 target = workspace / name
@@ -85,7 +85,7 @@ def prepare_inputs(paths: list[Path], workspace: Path) -> PreparedInput:
         source, kind = photo_directory(workspace)
         return PreparedInput(source, kind, len(collect_images(source)))
     if any(not p.is_file() or p.suffix.lower() not in IMAGE_EXTENSIONS for p in paths):
-        raise ValueError("Supported uploads: JPEG, PNG, WebP, BMP, TIFF, or one ZIP")
+        raise ValueError("Supported uploads: JPEG, PNG, WebP, BMP, TIFF, HEIC, HEIF, or one ZIP")
     workspace.mkdir(parents=True, exist_ok=False)
     unique_names = len({p.name for p in paths}) == len(paths)
     for index, path in enumerate(paths):

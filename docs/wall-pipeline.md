@@ -18,7 +18,7 @@ The older SAM3 comparison notebook remains the legacy YOLO11/Polycam comparison.
 
 ## Input and output
 
-2D accepts exactly one photo and exports masks, IDs, normalized 2D centers/sizes, color groups
+2D accepts exactly one photo (including iPhone HEIC) and exports masks, IDs, normalized 2D centers/sizes, color groups
 and optional six-class RGB type proposals. 3D accepts ordinary overlapping photos or a video,
 constructs a local wall through COLMAP, segments registered **undistorted images** and lifts masks
 using their stereo depth maps. Repeated evidence is fused through color consistency and 3D

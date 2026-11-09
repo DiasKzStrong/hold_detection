@@ -95,7 +95,7 @@ def prepare_runtime(work: Path, project: Path, sam3=False, accelerator="auto", t
                project, work / "logs/install_torch.log", extra_env=tool_env)
     common = ["numpy==1.26.4", "opencv-python==4.11.0.86", "ultralytics==8.4.207",
               "pycocotools==2.0.11", "pillow>=11,<13", "matplotlib>=3.8,<4",
-              "scipy>=1.14,<2", "trimesh>=4.10,<6"]
+              "scipy>=1.14,<2", "trimesh>=4.10,<6", "pillow-heif==1.8.1"]
     run_logged([*install, *TORCH_PACKAGES, *common], project,
                work / "logs/install_baseline.log", extra_env=tool_env)
     if training:
