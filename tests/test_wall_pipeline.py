@@ -91,6 +91,28 @@ def test_prepare_capture_cli_accepts_an_oriented_heic_photo(tmp_path, capsys):
         assert prepared.size == (67, 100)
 
 
+def test_photo_crop_uses_oriented_source_pixels_before_resizing(tmp_path):
+    source = tmp_path / "photo.jpg"
+    photo = Image.new("RGB", (160, 100), "blue")
+    photo.getexif()[274] = 6
+    photo.save(source, exif=photo.getexif().tobytes())
+    output = tmp_path / "capture"
+    bounds = [0.2, 0.25, 0.8, 0.75]
+    manifest = prepare_capture(source, output, max_image_edge=64, crop_xyxy=bounds)
+    frame = manifest["frames"][0]
+    assert frame["input_crop"] == {"coordinate_frame": "exif_oriented_source_pixels",
+                                  "source_size_wh": [100, 160], "crop_xyxy_px": [20, 40, 80, 120]}
+    with Image.open(output / frame["path"]) as prepared:
+        assert prepared.size == (48, 64)
+    assert prepare_capture(source, output, max_image_edge=64, crop_xyxy=bounds) == manifest
+    with pytest.raises(ValueError, match="settings/input changed"):
+        prepare_capture(source, output, max_image_edge=64, crop_xyxy=[0.3, 0.25, 0.8, 0.75])
+    with pytest.raises(ValueError, match="nonempty rectangle"):
+        prepare_capture(source, tmp_path / "invalid", crop_xyxy=[0.8, 0.25, 0.2, 0.75])
+    with pytest.raises(ValueError, match="single-photo 2D"):
+        prepare_capture(source, tmp_path / "3d", mode="3d", crop_xyxy=bounds)
+
+
 def test_video_capture_extracts_multiple_views_without_a_glb(tmp_path):
     import cv2
     video = tmp_path / "wall.avi"
@@ -229,7 +251,7 @@ def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(t
     source = tmp_path / "photo.jpg"
     Image.new("RGB", (20, 20), "blue").save(source)
     capture = tmp_path / "capture"
-    prepare_capture(source, capture)
+    prepared = prepare_capture(source, capture, crop_xyxy=[0.1, 0.2, 0.9, 1])
     weights = tmp_path / "sam3.pt"
     weights.write_bytes(b'external model fixture')
     type_weights = tmp_path / "types.pt"
@@ -259,6 +281,7 @@ def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(t
     segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=640)
     initial = export_wall_scene(run, "2d")
     assert initial["holds"][0]["hold_type"] == "jug"
+    assert initial["wall"]["input_crop"] == prepared["frames"][0]["input_crop"]
 
     def unexpected_process(*args, **kwargs):
         raise AssertionError("A completed inference frame must not run again")

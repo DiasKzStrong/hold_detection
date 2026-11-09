@@ -31,6 +31,12 @@ constructs a local wall through COLMAP, segments registered **undistorted images
 using their stereo depth maps. Repeated evidence is fused through color consistency and 3D
 sample overlap. Single-view and unmapped holds remain in the output for review.
 
+Enable `USE_2D_CROP` in the inference notebook to select the wall section using a
+rectangle and preview the crop. The `prepare-capture --crop-xyxy` CLI option accepts
+normalized left, top, right, and bottom edges on the EXIF-oriented source.
+The 2D coordinates refer to the prepared crop and `wall.input_crop` records its
+pixel bounds in the oriented source.
+
 Both modes return schema 3.0 `scene.json` with identical hold keys; `wall_scene.json` is an
 identical compatibility copy. No route planner is included. Image coordinates have top-left
 origin, x right and y down. COLMAP's world axes are arbitrary. The 3D scene exporter

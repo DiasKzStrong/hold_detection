@@ -208,6 +208,7 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
             observations.append(_observation(frame, hold))
     annotations = json.loads(Path(annotations_path).read_text()) if annotations_path else None
     scene = build_wall_scene(observations, mode, reconstruction, annotations, orientation)
+    scene["wall"]["input_crop"] = summary.get("input_crop")
     if reconstruction:
         import trimesh
         mesh = trimesh.load(reconstruction["mesh_path"], force="mesh", process=False)

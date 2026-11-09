@@ -2,6 +2,7 @@
 
 import hashlib
 import json
+from math import ceil, floor
 from pathlib import Path
 
 from PIL import Image, ImageOps
@@ -22,16 +23,28 @@ def source_identity(source):
     ]).encode()).hexdigest()
 
 
-def prepare_capture(source, output, mode="2d", max_frames=48, video_stride_seconds=0.75, max_image_edge=1600):
+def prepare_capture(source, output, mode="2d", max_frames=48, video_stride_seconds=0.75,
+                    max_image_edge=1600, crop_xyxy=None):
     """Copy oriented RGB frames; 3D ordinary inputs never require a prebuilt GLB."""
     source, output = Path(source).resolve(), Path(output).resolve()
     if mode not in {"2d", "3d"} or max_frames < 2 or video_stride_seconds <= 0 or max_image_edge < 64:
         raise ValueError("Choose mode 2d/3d, max_frames >= 2 and a positive video stride.")
+    if crop_xyxy is not None:
+        crop_xyxy = list(map(float, crop_xyxy))
+        if len(crop_xyxy) != 4:
+            raise ValueError("Supply four normalized crop coordinates: left top right bottom")
+        left, top, right, bottom = crop_xyxy
+        if not (0 <= left < right <= 1 and 0 <= top < bottom <= 1):
+            raise ValueError("Crop bounds must describe a nonempty rectangle inside the photo")
+        if mode != "2d":
+            raise ValueError("Cropping is supported for single-photo 2D captures")
     if source.is_dir() and output.is_relative_to(source):
         raise ValueError("Output must be outside the input directory.")
     signature = {"source": str(source), "identity": source_identity(source), "mode": mode,
                  "max_frames": max_frames, "video_stride_seconds": video_stride_seconds,
                  "max_image_edge": max_image_edge}
+    if crop_xyxy is not None:
+        signature["crop_xyxy_normalized"] = crop_xyxy
     marker = output / "capture.json"
     if marker.exists():
         manifest = json.loads(marker.read_text())
@@ -53,10 +66,17 @@ def prepare_capture(source, output, mode="2d", max_frames=48, video_stride_secon
     def save(image, origin, timestamp=None):
         path = images / f"frame_{len(frames):05d}.jpg"
         oriented = ImageOps.exif_transpose(image).convert("RGB")
+        frame = {"path": path.relative_to(output).as_posix(), "source": str(origin),
+                 "timestamp_seconds": timestamp}
+        if crop_xyxy is not None:
+            width, height = oriented.size
+            box = (floor(left * width), floor(top * height), ceil(right * width), ceil(bottom * height))
+            frame["input_crop"] = {"coordinate_frame": "exif_oriented_source_pixels",
+                                   "source_size_wh": [width, height], "crop_xyxy_px": list(box)}
+            oriented = oriented.crop(box)
         oriented.thumbnail((max_image_edge, max_image_edge), Image.Resampling.LANCZOS)
         oriented.save(path, quality=97)
-        frames.append({"path": path.relative_to(output).as_posix(), "source": str(origin),
-                       "timestamp_seconds": timestamp})
+        frames.append(frame)
 
     if source.suffix.lower() in VIDEO_EXTENSIONS:
         if mode != "3d":

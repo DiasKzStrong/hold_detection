@@ -83,6 +83,8 @@ def segment_capture(capture, run, reconstruction_path=None, sam_weights=None, ty
                  "segmentation_enabled": True,
                  "frames": frame_summaries, "grip_type_inference_enabled": bool(type_weights),
                  "settings": {"rotate": 0}, "models": settings}
+    if manifest["settings"]["mode"] == "2d" and manifest["frames"][0].get("input_crop"):
+        summaries["input_crop"] = manifest["frames"][0]["input_crop"]
     (inference / "summary.json").write_text(json.dumps(summaries, indent=2) + "\n")
     from .scene import build_scene
     build_scene(inference)

@@ -41,6 +41,9 @@ def add_wall_commands(commands):
     capture.add_argument("--max-frames", type=int, default=48)
     capture.add_argument("--video-stride-seconds", type=float, default=0.75)
     capture.add_argument("--max-image-edge", type=int, default=1600)
+    capture.add_argument("--crop-xyxy", type=float, nargs=4,
+                         metavar=("LEFT", "TOP", "RIGHT", "BOTTOM"),
+                         help="2D crop bounds normalized to the EXIF-oriented source photo")
     reconstruct = commands.add_parser("reconstruct-wall", help="Reconstruct an ordinary RGB capture with CUDA COLMAP")
     reconstruct.add_argument("capture", type=Path)
     reconstruct.add_argument("--output", type=Path, required=True)
