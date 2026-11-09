@@ -9,6 +9,7 @@ from PIL import Image
 from scipy.spatial import cKDTree
 
 from .reconstruction import lift_mask, read_colmap_cameras, read_colmap_depth
+from .wall_orientation import estimate_up, manual_up
 
 
 def assign_type_proposals(holds, proposals, minimum_score=0.5, minimum_iou=0.3):
@@ -92,11 +93,13 @@ def fuse_holds(observations, scale_m_per_unit=None):
     return groups
 
 
-def build_wall_scene(observations, mode, reconstruction=None, annotations=None):
+def build_wall_scene(observations, mode, reconstruction=None, annotations=None, orientation=None):
     """Keep identical keys in 2D and 3D; unavailable geometry is null, never fabricated."""
     if mode not in {"2d", "3d"}:
         raise ValueError("Mode must be 2d or 3d")
     reconstruction = reconstruction or {}
+    orientation = orientation if mode == "3d" else None
+    up = orientation["up_vector"] if orientation else None
     scale = reconstruction.get("scale_m_per_unit") if mode == "3d" else None
     if scale is not None and (not np.isfinite(scale) or scale <= 0):
         raise ValueError("Scale must be finite and positive")
@@ -107,6 +110,7 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None):
         valid = [item["geometry"] for item in group if item.get("geometry")] if mode == "3d" else []
         points = np.concatenate([item["samples"] for item in valid]) if valid else None
         position = np.median(points, axis=0) if valid else None
+        height = float(position @ up) if valid and up is not None else None
         size = np.ptp(points, axis=0) if valid else None
         normals = [item["wall_normal"] for item in valid if item["wall_normal"] is not None]
         normal = np.mean(normals, axis=0) if normals else None
@@ -124,6 +128,8 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None):
             "size_2d_normalized": first["size_2d_normalized"], "reference_frame_id": first["frame_id"],
             "position_3d": position.tolist() if valid else None,
             "position_3d_m": (position * scale).tolist() if valid and scale else None,
+            "height_3d": height,
+            "height_m": height * scale if height is not None and scale is not None else None,
             "size_3d_m": (size * scale).tolist() if valid and scale else None,
             "protrusion_m": float(np.median(protrusions) * scale) if protrusions and scale else None,
             "aabb_volume_m3": float(np.prod(size * scale)) if valid and scale else None,
@@ -153,6 +159,8 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None):
             "wall": {"coordinate_frame": "colmap_world" if mode == "3d" else "processed_image",
                      "units": reconstruction.get("units", "arbitrary" if mode == "3d" else "normalized_image"),
                      "scale_m_per_unit": scale, "up_axis": None,
+                     "up_vector": up, "up_orientation": orientation,
+                     "height_reference": "reconstruction_origin" if up is not None else None,
                      "glb_path": reconstruction.get("glb_path"), "reconstruction": reconstruction},
             "holds": holds, "observations": observations,
             "review": {"unknown_type_count": sum(h["hold_type"] == "unknown" for h in holds),
@@ -161,13 +169,20 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None):
                             "occluded_grip_metrics_unavailable", "aabb_volume_is_not_true_hold_volume"]}
 
 
-def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None):
+def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None, up_reference_path=None):
     """Lift saved masks, retain all observations and write the graph algorithm's scene.json."""
     run = Path(run).resolve()
     reconstruction = json.loads(Path(reconstruction_path).read_text()) if reconstruction_path else {}
     if mode == "3d" and not reconstruction:
         raise ValueError("3D export requires reconstruction.json")
+    if up_reference_path and mode != "3d":
+        raise ValueError("An up reference requires a 3D export")
     cameras = read_colmap_cameras(reconstruction["camera_model"]) if reconstruction else {}
+    orientation = None
+    if mode == "3d":
+        orientation = (manual_up(cameras, reconstruction["depth_directory"],
+                                 json.loads(Path(up_reference_path).read_text()))
+                       if up_reference_path else estimate_up(cameras))
     frame_paths = sorted((run / "inference").glob("*/holds.json"))
     summary = json.loads((run / "inference/summary.json").read_text())
     if not frame_paths or summary["frame_count"] != len(frame_paths):
@@ -192,7 +207,7 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
                 hold["geometry"] = lift_mask(depth, mask, camera)
             observations.append(_observation(frame, hold))
     annotations = json.loads(Path(annotations_path).read_text()) if annotations_path else None
-    scene = build_wall_scene(observations, mode, reconstruction, annotations)
+    scene = build_wall_scene(observations, mode, reconstruction, annotations, orientation)
     if reconstruction:
         import trimesh
         mesh = trimesh.load(reconstruction["mesh_path"], force="mesh", process=False)

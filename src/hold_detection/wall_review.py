@@ -94,8 +94,10 @@ def wall_mesh_figure(scene, labels, face_budget=120_000):
                 for axis, values in enumerate(links):
                     values.extend([center[axis], anchor[axis], None])
             points.append(anchor)
+            height = hold.get("height_3d")
+            height_text = f"<br>Relative height: {height * scale:.3g} {scene['wall']['units']}" if height is not None else ""
             captions.append(f"{labels[hold['id']]} · {hold['hold_type']}"
-                            f"<br>{hold['observation_count']} view(s){distance}")
+                            f"<br>{hold['observation_count']} view(s){height_text}{distance}")
         if points:
             px, py, pz = np.asarray(points).T
             figure.add_scatter3d(x=px, y=py, z=pz, mode="markers", name=name,
@@ -111,4 +113,7 @@ def wall_mesh_figure(scene, labels, face_budget=120_000):
         scene=dict(aspectmode="data"),
         legend=dict(orientation="h", x=0, y=0.02),
     )
+    up = scene["wall"].get("up_vector")
+    if up is not None:
+        figure.update_scenes(camera_up=dict(zip("xyz", up)))
     return figure

@@ -63,6 +63,8 @@ def add_wall_commands(commands):
     export.add_argument("--mode", choices=["2d", "3d"], required=True)
     export.add_argument("--reconstruction-path", type=Path)
     export.add_argument("--annotations-path", type=Path)
+    export.add_argument("--up-reference", dest="up_reference_path", type=Path,
+                        help="JSON with the image name and bottom_px/top_px on a real vertical line")
     analyze = commands.add_parser("analyze-wall", help="Complete 2D photo or 3D photos/video wall analysis")
     analyze.add_argument("source", type=Path)
     analyze.add_argument("--output", type=Path, required=True)

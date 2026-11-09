@@ -152,19 +152,35 @@ def reconstruct_wall(capture, output, colmap="colmap", quality="medium", scale_m
     return result
 
 
-def scale_from_reference(depth, camera, reference):
-    """Calibrate from two undistorted-image pixels on a visible known-length reference."""
+def reference_camera_points(depth, camera, pixels, require_support=False):
+    """Unproject two reference pixels in the undistorted camera frame."""
+    pixels = np.asarray(pixels, dtype=float)
+    if pixels.shape != (2, 2) or not np.isfinite(pixels).all():
+        raise ValueError("Expected two finite reference pixels")
     positions = []
-    for x, y in [reference["point_a_px"], reference["point_b_px"]]:
+    for x, y in pixels:
+        if not 0 <= x < camera["width"] or not 0 <= y < camera["height"]:
+            raise ValueError("Reference pixels lie outside the undistorted image")
         row, column = int(y * depth.shape[0] / camera["height"]), int(x * depth.shape[1] / camera["width"])
-        if not 0 <= row < depth.shape[0] or not 0 <= column < depth.shape[1]:
-            raise ValueError("Scale reference pixels lie outside the undistorted image")
         z = float(depth[row, column])
         if not np.isfinite(z) or z <= 0:
-            raise ValueError("Scale reference has no valid stereo depth")
+            raise ValueError("Reference has no valid stereo depth at a clicked point")
+        if require_support:
+            patch = depth[max(0, row - 1):row + 2, max(0, column - 1):column + 2]
+            agreeing = np.isfinite(patch) & (np.abs(patch - z) <= 0.05 * z)
+            if np.count_nonzero(agreeing) < max(3, patch.size // 2 + 1):
+                raise ValueError("Reference depth is inconsistent near a clicked point; choose another point or frame")
         positions.append([(x - camera["cx"]) * z / camera["fx"],
                           (y - camera["cy"]) * z / camera["fy"], z])
-    length = float(np.linalg.norm(np.array(positions[1]) - positions[0]))
+    return np.asarray(positions)
+
+
+def scale_from_reference(depth, camera, reference):
+    """Calibrate from two undistorted-image pixels on a visible known-length reference."""
+    first, second = reference_camera_points(
+        depth, camera, [reference["point_a_px"], reference["point_b_px"]],
+    )
+    length = float(np.linalg.norm(second - first))
     distance_m = float(reference["distance_m"])
     if length <= 1e-9 or not np.isfinite(distance_m) or distance_m <= 0:
         raise ValueError("Reference length must be finite and positive with distinct endpoints")

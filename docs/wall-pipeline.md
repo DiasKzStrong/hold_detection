@@ -33,7 +33,22 @@ sample overlap. Single-view and unmapped holds remain in the output for review.
 
 Both modes return schema 3.0 `scene.json` with identical hold keys; `wall_scene.json` is an
 identical compatibility copy. No route planner is included. Image coordinates have top-left
-origin, x right and y down. COLMAP world orientation is arbitrary, with `up_axis=null`.
+origin, x right and y down. COLMAP's world axes are arbitrary. The 3D scene exporter
+estimates `wall.up_vector` from the registered camera poses and records the result in
+`wall.up_orientation`. Upright views with enough variation in camera direction can
+provide a usable estimate. Ambiguous captures return `manual_required`.
+
+The Colab picker accepts two clicks on a known vertical line in an undistorted
+registered image. The CLI accepts the same reference with `export-wall --up-reference`.
+An example reference file is
+`{"image":"frame_00003.jpg","bottom_px":[320,550],"top_px":[320,180]}`.
+Both points need valid, locally consistent geometric stereo depth. This export uses
+the existing reconstruction and inference files.
+
+Use `height_3d` to order holds from lower to higher. It is a projection onto the up
+vector relative to the reconstruction origin. `height_m` is the same projection
+with metric scale applied. Heights are null when the hold is unmapped or vertical
+could not be resolved.
 
 ```text
 RUN/capture/capture.json
