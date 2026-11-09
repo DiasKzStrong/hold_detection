@@ -48,7 +48,7 @@ The Colab picker accepts two clicks on a known vertical line in an undistorted
 registered image. The CLI accepts the same reference with `export-wall --up-reference`.
 An example reference file is
 `{"image":"frame_00003.jpg","bottom_px":[320,550],"top_px":[320,180]}`.
-Both points need valid, locally consistent geometric stereo depth. This export uses
+Both points need valid, locally consistent stereo depth. This export uses
 the existing reconstruction and inference files.
 
 Use `height_3d` to order holds from lower to higher. It is a projection onto the up
@@ -79,13 +79,18 @@ and pinned official SAM3 dependencies from [SAM3 setup](sam3.md). The notebook r
 can prepare this Python environment. HPC can use an existing CUDA Python or container wrapper;
 see [NYU runtime setup](nyu-hpc.md). Do not replace its CUDA wheels with the root CPU uv lock.
 
-3D also requires a **CUDA-enabled COLMAP executable** inside that same environment/container.
-Set DEMO_COLMAP if it is outside PATH. Installing pycolmap alone does not supply this CLI.
+3D requires a **CUDA-enabled COLMAP executable**. On Linux x86-64 Colab, the
+reconstruction cell installs the pinned conda-forge CUDA 12.6 CLI in a private
+prefix on first use. For a local or HPC setup, set DEMO_COLMAP if your CUDA COLMAP
+is outside PATH. Installing pycolmap alone does not supply this CLI.
 Consult [COLMAP installation](https://colmap.github.io/install.html) and
 [CLI documentation](https://colmap.github.io/cli.html). Check `colmap automatic_reconstructor -h`
 before a full run. Headless jobs set `QT_QPA_PLATFORM=offscreen`; no unverified cluster module
 name is assumed. Download approved SAM3 weights before inference and train the YOLO checkpoint
 separately. No GPU job has been submitted by the development agent.
+
+For 3D lifting and calibration the exporter prefers geometric stereo depth. It
+uses photometric depth when that is the output of the selected COLMAP preset.
 
 ## One CLI command
 

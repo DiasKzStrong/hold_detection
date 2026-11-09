@@ -8,7 +8,7 @@ import numpy as np
 from PIL import Image
 from scipy.spatial import cKDTree
 
-from .reconstruction import lift_mask, read_colmap_cameras, read_colmap_depth
+from .reconstruction import colmap_depth_path, lift_mask, read_colmap_cameras, read_colmap_depth
 from .wall_orientation import estimate_up, manual_up
 
 
@@ -211,7 +211,7 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
         depth = None
         if camera:
             name = Path(frame["source_image"]).name
-            depth_file = Path(reconstruction["depth_directory"]) / f"{name}.geometric.bin"
+            depth_file = colmap_depth_path(reconstruction["depth_directory"], name)
             if depth_file.exists():
                 depth = read_colmap_depth(depth_file)
         for hold in frame["holds"]:
@@ -222,6 +222,8 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
                 if frame.get("rotation_clockwise_degrees", 0):
                     raise ValueError("COLMAP masks must use unrotated undistorted images")
                 hold["geometry"] = lift_mask(depth, mask, camera)
+                if hold["geometry"]:
+                    hold["geometry"]["depth_map_type"] = depth_file.name.rsplit(".", 2)[1]
             observations.append(_observation(frame, hold))
     annotations = json.loads(Path(annotations_path).read_text()) if annotations_path else None
     scene = build_wall_scene(observations, mode, reconstruction, annotations, orientation)

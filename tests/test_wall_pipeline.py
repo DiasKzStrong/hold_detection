@@ -17,7 +17,7 @@ import nbformat
 from hold_detection.capture import prepare_capture
 from hold_detection.geometry import Detection
 from hold_detection.pipeline import run_inference
-from hold_detection.reconstruction import lift_mask, read_colmap_depth, read_colmap_cameras, reconstruct_wall, scale_from_reference
+from hold_detection.reconstruction import colmap_depth_path, lift_mask, read_colmap_depth, read_colmap_cameras, reconstruct_wall, scale_from_reference
 from hold_detection.wall_scene import assign_type_proposals, build_wall_scene, export_wall_scene
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -197,6 +197,15 @@ def test_known_reference_recovers_scale_without_inventing_missing_depth():
     depth[4, 2] = 0
     with pytest.raises(ValueError, match="valid stereo depth"):
         scale_from_reference(depth, camera(), reference)
+
+
+def test_colmap_prefers_geometric_depth_when_both_maps_exist(tmp_path):
+    photo = tmp_path / "frame.jpg.photometric.bin"
+    photo.touch()
+    assert colmap_depth_path(tmp_path, "frame.jpg") == photo
+    geometric = tmp_path / "frame.jpg.geometric.bin"
+    geometric.touch()
+    assert colmap_depth_path(tmp_path, "frame.jpg") == geometric
 
 
 def test_reconstruction_external_adapter_exports_real_mesh_and_reuses_completed_stage(tmp_path):

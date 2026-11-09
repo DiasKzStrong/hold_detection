@@ -1,6 +1,7 @@
 """COLMAP reconstruction, calibrated depth lifting and explicit metric scale."""
 
 import json
+import os
 from pathlib import Path
 import shutil
 import subprocess
@@ -8,6 +9,13 @@ import subprocess
 import numpy as np
 from PIL import Image
 from scipy.spatial.transform import Rotation
+
+
+def colmap_depth_path(directory, image):
+    """Prefer geometric depth and fall back to the photometric output of fast presets."""
+    directory = Path(directory)
+    geometric = directory / f"{image}.geometric.bin"
+    return geometric if geometric.is_file() else directory / f"{image}.photometric.bin"
 
 
 def read_colmap_depth(path):
@@ -102,11 +110,16 @@ def reconstruct_wall(capture, output, colmap="colmap", quality="medium", scale_m
         raise ValueError("Completed reconstruction has missing artifacts")
     executable = shutil.which(str(colmap))
     if not executable:
-        raise RuntimeError("COLMAP executable not found. Load a CUDA COLMAP module/container and set --colmap.")
+        raise RuntimeError("COLMAP executable not found. Run the 3D setup in the Colab notebook "
+                           "or pass a CUDA-enabled executable with --colmap.")
+
+    environment = os.environ.copy()
+    environment.setdefault("QT_QPA_PLATFORM", "offscreen")
 
     def command(arguments, name):
         with (output / f"{name}.log").open("a") as log:
-            result = subprocess.run([executable, *map(str, arguments)], stdout=log, stderr=subprocess.STDOUT)
+            result = subprocess.run([executable, *map(str, arguments)], stdout=log,
+                                    stderr=subprocess.STDOUT, env=environment)
         if result.returncode:
             raise RuntimeError(f"COLMAP {name} failed ({result.returncode}); inspect {output / (name + '.log')}")
 
@@ -131,7 +144,7 @@ def reconstruct_wall(capture, output, colmap="colmap", quality="medium", scale_m
         raise RuntimeError("Reconstructed mesh is empty")
     if reference is not None:
         name = reference["image"]
-        depth = read_colmap_depth(dense / "stereo/depth_maps" / f"{name}.geometric.bin")
+        depth = read_colmap_depth(colmap_depth_path(dense / "stereo/depth_maps", name))
         scale_m_per_unit = scale_from_reference(depth, cameras[name], reference)
     if scale_m_per_unit is not None:
         mesh.apply_scale(scale_m_per_unit)

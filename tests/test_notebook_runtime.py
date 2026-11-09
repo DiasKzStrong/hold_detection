@@ -97,6 +97,39 @@ def test_driver_detection_timeout_is_not_a_kernel_import_failure(monkeypatch):
     assert runtime._gpu_present() is False
 
 
+def test_colab_installs_and_reuses_cuda_colmap_in_a_private_prefix(tmp_path, monkeypatch):
+    monkeypatch.setattr(runtime.platform, "system", lambda: "Linux")
+    monkeypatch.setattr(runtime.platform, "machine", lambda: "x86_64")
+    monkeypatch.setattr(runtime, "_gpu_present", lambda: True)
+    prefix = tmp_path / "colmap-cuda126"
+    executable = prefix / "bin/colmap"
+    commands = []
+
+    def download(binary):
+        binary.parent.mkdir(parents=True)
+        binary.touch()
+
+    def run(command, project, log, extra_env=None):
+        commands.append(command)
+        assert extra_env["QT_QPA_PLATFORM"] == "offscreen"
+        if "create" in command:
+            executable.parent.mkdir(parents=True)
+            executable.touch()
+            (prefix / "conda-meta").mkdir()
+            (prefix / "conda-meta/history").write_text("CUDA COLMAP transaction completed\n")
+        else:
+            assert command == [executable, "-h"]
+            log.parent.mkdir(parents=True, exist_ok=True)
+            log.write_text("COLMAP 3.13.0 (with CUDA)\n  patch_match_stereo\n")
+
+    monkeypatch.setattr(runtime, "_download_micromamba", download)
+    monkeypatch.setattr(runtime, "run_logged", run)
+    assert runtime.prepare_colmap(tmp_path, tmp_path) == executable
+    assert runtime.COLMAP_PACKAGE in commands[0] and "cuda-version=12.6" in commands[0]
+    assert runtime.prepare_colmap(tmp_path, tmp_path) == executable
+    assert commands[1:] == [[executable, "-h"], [executable, "-h"]]
+
+
 def test_health_check_runs_in_child_and_reports_import_error(tmp_path, monkeypatch):
     commands = []
     def broken(command, **kwargs):

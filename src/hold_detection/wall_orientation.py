@@ -1,10 +1,8 @@
 """Estimate vertical in the COLMAP frame or calibrate it from an image reference."""
 
-from pathlib import Path
-
 import numpy as np
 
-from .reconstruction import read_colmap_depth, reference_camera_points
+from .reconstruction import colmap_depth_path, read_colmap_depth, reference_camera_points
 
 
 def estimate_up(cameras):
@@ -42,9 +40,9 @@ def manual_up(cameras, depth_directory, reference):
     image = reference["image"]
     if not isinstance(image, str) or image not in cameras:
         raise ValueError("Choose an undistorted image registered by COLMAP")
-    depth_path = Path(depth_directory) / f"{image}.geometric.bin"
+    depth_path = colmap_depth_path(depth_directory, image)
     if not depth_path.is_file():
-        raise ValueError("This image has no geometric stereo depth; choose another frame")
+        raise ValueError("This image has no stereo depth; choose another frame")
     camera = cameras[image]
     depth = read_colmap_depth(depth_path)
     bottom, top = reference_camera_points(
@@ -58,4 +56,5 @@ def manual_up(cameras, depth_directory, reference):
     if length <= 1e-9 or pixel_gap < 5:
         raise ValueError("Pick two separated points on the same vertical line")
     return {"status": "calibrated", "source": "manual_reference",
-            "up_vector": (delta / length).tolist(), "reference": reference}
+            "up_vector": (delta / length).tolist(), "reference": reference,
+            "depth_map_type": depth_path.name.rsplit(".", 2)[1]}

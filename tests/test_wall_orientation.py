@@ -38,7 +38,7 @@ def test_manual_vertical_reexports_existing_holds_and_rejects_invalid_depth(tmp_
     model.mkdir()
     (model / "cameras.txt").write_text("1 PINHOLE 32 24 16 16 16 12\n")
     (model / "images.txt").write_text("1 1 0 0 0 0 0 0 1 frame.jpg\n\n")
-    depth = tmp_path / "frame.jpg.geometric.bin"
+    depth = tmp_path / "frame.jpg.photometric.bin"
     values = np.full((24, 32), 2.0, dtype="<f4")
     values[2, 2] = 0
     depth.write_bytes(b"32&24&1&" + values.tobytes())
@@ -76,6 +76,8 @@ def test_manual_vertical_reexports_existing_holds_and_rejects_invalid_depth(tmp_
     calibrated = scene_path.read_text()
     scene = json.loads(calibrated)
     assert scene["wall"]["up_vector"] == [0, -1, 0]
+    assert scene["wall"]["up_orientation"]["depth_map_type"] == "photometric"
+    assert all(obs["geometry"]["depth_map_type"] == "photometric" for obs in scene["observations"])
     assert [h["id"] for h in scene["holds"]] == [h["id"] for h in original["holds"]]
     low, high = scene["holds"]
     assert high["height_3d"] > low["height_3d"]

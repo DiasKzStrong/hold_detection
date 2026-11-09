@@ -3,6 +3,7 @@
 import json
 import os
 from pathlib import Path
+import platform
 import shutil
 import subprocess
 import sys
@@ -10,6 +11,9 @@ import sys
 SAM3_REVISION = "7f473cfd983d5eb43040ff608f66bff0d7bdcb53"
 UV_VERSION = "0.12.23"
 TORCH_PACKAGES = ["torch==2.7.1", "torchvision==0.22.1"]
+MICROMAMBA_ARCHIVE = "micromamba-2.3.3-0.tar.bz2"
+MICROMAMBA_SHA256 = "e7274528ceb9c20d048a428d6c22d7e02e268f8ffb762c4c365422347c8b8ba2"
+COLMAP_PACKAGE = "colmap=3.13.0=cuda_126h5ca8012_3"
 
 
 def environment(project: Path):
@@ -61,6 +65,56 @@ def _gpu_present():
     except (OSError, subprocess.TimeoutExpired):
         return False
     return result.returncode == 0 and bool(result.stdout.strip())
+
+
+def _download_micromamba(binary: Path):
+    from hashlib import sha256
+    from io import BytesIO
+    import tarfile
+    from urllib.request import urlopen
+
+    url = f"https://conda.anaconda.org/conda-forge/linux-64/{MICROMAMBA_ARCHIVE}"
+    with urlopen(url, timeout=90) as response:
+        archive_bytes = response.read()
+    if sha256(archive_bytes).hexdigest() != MICROMAMBA_SHA256:
+        raise RuntimeError("Micromamba download failed its SHA-256 check")
+    binary.parent.mkdir(parents=True, exist_ok=True)
+    temporary = binary.with_name(binary.name + ".tmp")
+    with tarfile.open(fileobj=BytesIO(archive_bytes), mode="r:bz2") as archive:
+        with archive.extractfile("bin/micromamba") as source, temporary.open("wb") as target:
+            shutil.copyfileobj(source, target)
+    temporary.chmod(0o755)
+    temporary.replace(binary)
+
+
+def prepare_colmap(work: Path, project: Path) -> Path:
+    """Install and verify the pinned headless CUDA COLMAP CLI in a private prefix."""
+    if platform.system() != "Linux" or platform.machine() != "x86_64":
+        raise RuntimeError("The notebook COLMAP installer requires Linux x86-64. Set COLMAP to your executable.")
+    if not _gpu_present():
+        raise RuntimeError("Select an NVIDIA GPU runtime in Colab before running 3D reconstruction")
+    work, project = Path(work).resolve(), Path(project).resolve()
+    prefix = work / "colmap-cuda126"
+    executable = prefix / "bin/colmap"
+    history = prefix / "conda-meta/history"
+    cache = work / "colmap-cache"
+    env = {"MAMBA_ROOT_PREFIX": str(cache), "CONDA_PKGS_DIRS": str(cache / "pkgs"),
+           "MAMBA_EXTRACT_THREADS": "2", "QT_QPA_PLATFORM": "offscreen"}
+    if not executable.is_file() or not history.is_file() or not history.stat().st_size:
+        micromamba = work / "bootstrap-tools/micromamba-2.3.3"
+        if not micromamba.is_file():
+            _download_micromamba(micromamba)
+        print("Installing CUDA COLMAP in a separate environment. The first download takes several minutes.", flush=True)
+        operation = "install" if history.is_file() else "create"
+        run_logged([micromamba, "--no-rc", operation, "-y", "--prefix", prefix,
+                    "--channel", "conda-forge", "--override-channels", COLMAP_PACKAGE, "cuda-version=12.6"],
+                   project, work / "logs/install_colmap.log", extra_env=env)
+    probe = work / "logs/colmap_doctor.log"
+    run_logged([executable, "-h"], project, probe, extra_env=env)
+    help_text = probe.read_text(errors="replace")
+    if "with CUDA" not in help_text or "patch_match_stereo" not in help_text:
+        raise RuntimeError(f"COLMAP does not advertise CUDA dense stereo. Inspect {probe}.")
+    return executable
 
 
 def prepare_runtime(work: Path, project: Path, sam3=False, accelerator="auto", training=False):
