@@ -56,10 +56,17 @@ vector relative to the reconstruction origin. `height_m` is the same projection
 with metric scale applied. Heights are null when the hold is unmapped or vertical
 could not be resolved.
 
+When the up direction is resolved, scene export writes `wall_upright.glb` with
+glTF +Y pointing up. `wall.glb_path` points to this file, and `wall.reconstruction_to_glb`
+records the 4×4 transform from the reconstruction, including any metric scale.
+Use `position_glb` to place hold markers or animation targets in the downloaded
+mesh. The reconstruction coordinates remain available for camera correspondence.
+
 ```text
 RUN/capture/capture.json
 RUN/reconstruction/reconstruction.json   # 3D only
-RUN/reconstruction/wall.glb              # 3D only
+RUN/reconstruction/wall.glb              # raw reconstruction checkpoint
+RUN/wall_upright.glb                     # oriented export when up is resolved
 RUN/frame_batches/frame_00000/...        # completed model subprocess checkpoints
 RUN/inference/index.html                # mask/color/type review gallery
 RUN/inference/FRAME/holds.json

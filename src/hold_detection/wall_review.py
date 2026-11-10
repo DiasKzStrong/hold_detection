@@ -82,11 +82,16 @@ def wall_mesh_figure(scene, labels, face_budget=120_000):
         for hold in scene["holds"]:
             if hold["geometry_status"] != status or hold["position_3d"] is None:
                 continue
-            center = np.asarray(hold["position_3d"]) * scale
+            center = hold.get("position_glb")
+            if center is None:
+                center = np.asarray(hold["position_3d"]) * scale
             correspondence = hold["mesh_correspondence"]
-            anchor = np.asarray(correspondence["position_3d"]) * scale if correspondence else center
+            anchor = center
             distance = ""
             if correspondence:
+                anchor = correspondence.get("position_glb")
+                if anchor is None:
+                    anchor = np.asarray(correspondence["position_3d"]) * scale
                 gap_m = correspondence["distance_m"]
                 gap = (f"{gap_m:.3g} m" if gap_m is not None else
                        f"{correspondence['distance_reconstruction_units']:.3g} reconstruction units")
@@ -113,7 +118,7 @@ def wall_mesh_figure(scene, labels, face_budget=120_000):
         scene=dict(aspectmode="data"),
         legend=dict(orientation="h", x=0, y=0.02),
     )
-    up = scene["wall"].get("up_vector")
+    up = [0, 1, 0] if scene["wall"].get("glb_up_axis") == "y" else scene["wall"].get("up_vector")
     if up is not None:
         figure.update_scenes(camera_up=dict(zip("xyz", up)))
     return figure

@@ -43,11 +43,15 @@ def test_manual_vertical_reexports_existing_holds_and_rejects_invalid_depth(tmp_
     values[2, 2] = 0
     depth.write_bytes(b"32&24&1&" + values.tobytes())
     mesh = tmp_path / "wall.ply"
-    trimesh.creation.box().export(mesh)
+    source_mesh = trimesh.creation.box(extents=[1, 3, 0.2]).apply_translation([0, -0.75, 2])
+    source_mesh.export(mesh)
+    raw_glb = tmp_path / "wall.glb"
+    source_mesh.copy().apply_scale(0.5).export(raw_glb)
+    raw_bytes = raw_glb.read_bytes()
     reconstruction = tmp_path / "reconstruction.json"
     reconstruction.write_text(json.dumps({
         "camera_model": str(model), "depth_directory": str(tmp_path),
-        "mesh_path": str(mesh), "scale_m_per_unit": 0.5, "units": "meters",
+        "mesh_path": str(mesh), "glb_path": str(raw_glb), "scale_m_per_unit": 0.5, "units": "meters",
     }))
     holds = []
     for index, top in enumerate([14, 5], 1):
@@ -82,9 +86,30 @@ def test_manual_vertical_reexports_existing_holds_and_rejects_invalid_depth(tmp_
     low, high = scene["holds"]
     assert high["height_3d"] > low["height_3d"]
     assert high["height_m"] == 0.5 * high["height_3d"]
+    assert scene["wall"]["glb_up_axis"] == "y"
+    upright = tmp_path / "wall_upright.glb"
+    assert scene["wall"]["glb_path"] == str(upright)
+    transform = np.asarray(scene["wall"]["reconstruction_to_glb"])
+    aligned_mesh = trimesh.load_mesh(upright, process=False)
+    np.testing.assert_allclose(aligned_mesh.vertices, trimesh.transform_points(source_mesh.vertices, transform))
+    assert high["position_glb"][1] > low["position_glb"][1]
+    np.testing.assert_allclose(high["position_glb"][1], high["height_m"])
+    match = high["mesh_correspondence"]
+    np.testing.assert_allclose(match["position_glb"], aligned_mesh.vertices[match["vertex_index"]])
+    assert raw_glb.read_bytes() == raw_bytes
     assert (tmp_path / "wall_scene.json").read_text() == calibrated
 
     reference.write_text(json.dumps(dict(clicks, top_px=[2, 2])))
     assert main(args + ["--up-reference", str(reference)]) == 1
     assert "no valid stereo depth" in capsys.readouterr().err
     assert scene_path.read_text() == calibrated
+
+    with (model / "images.txt").open("a") as poses:
+        for index, yaw in enumerate([-0.6, 0.6], 2):
+            poses.write(f"{index} {np.cos(yaw / 2)} 0 {np.sin(yaw / 2)} 0 0 0 0 1 view{index}.jpg\n\n")
+    assert main(args) == 0
+    auto = json.loads(scene_path.read_text())
+    assert auto["wall"]["up_orientation"]["status"] == "estimated"
+    assert auto["wall"]["glb_path"] == str(upright)
+    np.testing.assert_allclose(auto["wall"]["reconstruction_to_glb"], transform, atol=1e-7)
+    assert raw_glb.read_bytes() == raw_bytes

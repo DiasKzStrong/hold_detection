@@ -3,13 +3,14 @@
 import hashlib
 import json
 from pathlib import Path
+from tempfile import TemporaryDirectory
 
 import numpy as np
 from PIL import Image
 from scipy.spatial import cKDTree
 
 from .reconstruction import colmap_depth_path, lift_mask, read_colmap_cameras, read_colmap_depth
-from .wall_orientation import estimate_up, manual_up
+from .wall_orientation import estimate_up, glb_frame_transform, manual_up
 
 
 def assign_type_proposals(holds, proposals, minimum_score=0.5, minimum_iou=0.3):
@@ -145,6 +146,7 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None, 
             "size_2d_normalized": first["size_2d_normalized"], "reference_frame_id": first["frame_id"],
             "position_3d": position.tolist() if valid else None,
             "position_3d_m": (position * scale).tolist() if valid and scale else None,
+            "position_glb": None,
             "height_3d": height,
             "height_m": height * scale if height is not None and scale is not None else None,
             "size_3d_m": (size * scale).tolist() if valid and scale else None,
@@ -178,7 +180,8 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None, 
                      "scale_m_per_unit": scale, "up_axis": None,
                      "up_vector": up, "up_orientation": orientation,
                      "height_reference": "reconstruction_origin" if up is not None else None,
-                     "glb_path": reconstruction.get("glb_path"), "reconstruction": reconstruction},
+                     "glb_path": reconstruction.get("glb_path"), "glb_up_axis": None,
+                     "reconstruction_to_glb": None, "reconstruction": reconstruction},
             "holds": holds, "observations": observations,
             "review": {"unknown_type_count": sum(h["hold_type"] == "unknown" for h in holds),
                        "unmapped_hold_count": sum(h["position_3d"] is None for h in holds) if mode == "3d" else 0},
@@ -236,17 +239,35 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
         mesh = trimesh.load(reconstruction["mesh_path"], force="mesh", process=False)
         tree = cKDTree(np.asarray(mesh.vertices))
         scale = reconstruction.get("scale_m_per_unit")
+        wall = scene["wall"]
+        transform = glb_frame_transform(wall["up_vector"], cameras, scale)
+        upright = run / "wall_upright.glb" if wall["up_vector"] is not None else None
+        if upright is not None:
+            wall.update(glb_path=str(upright), glb_up_axis="y")
+        if wall["glb_path"]:
+            wall["reconstruction_to_glb"] = transform.tolist()
+        linear = transform[:3, :3]
         for hold in scene["holds"]:
             if hold["position_3d"] is None:
                 continue
             distance, index = tree.query(hold["position_3d"])
+            anchor = mesh.vertices[index]
+            if wall["glb_path"]:
+                hold["position_glb"] = (linear @ hold["position_3d"]).tolist()
             hold["mesh_correspondence"] = {
                 "method": "nearest_mesh_vertex", "mesh_path": reconstruction["mesh_path"],
-                "vertex_index": int(index), "position_3d": mesh.vertices[index].tolist(),
+                "vertex_index": int(index), "position_3d": anchor.tolist(),
+                "position_glb": (linear @ anchor).tolist() if wall["glb_path"] else None,
                 "distance_reconstruction_units": float(distance),
                 "distance_m": float(distance * scale) if scale else None,
                 "is_semantic_hold_object_match": False, "needs_review": True,
             }
+        if upright is not None:
+            mesh.apply_transform(transform)
+            with TemporaryDirectory(dir=run, prefix=".glb-") as directory:
+                temporary = Path(directory) / upright.name
+                mesh.export(temporary)
+                temporary.replace(upright)
     for observation in scene["observations"]:
         if observation["mask_path"]:
             observation["mask_path"] = "inference/" + observation["mask_path"]

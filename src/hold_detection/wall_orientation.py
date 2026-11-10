@@ -5,6 +5,26 @@ import numpy as np
 from .reconstruction import colmap_depth_path, read_colmap_depth, reference_camera_points
 
 
+def glb_frame_transform(up, cameras, scale_m_per_unit):
+    """Map reconstruction coordinates to the GLB frame with +Y up."""
+    transform = np.eye(4)
+    if up is not None:
+        up = np.asarray(up, dtype=float)
+        # Face the capture cameras while choosing the remaining rotation about up.
+        front = -np.mean([np.asarray(camera["rotation"])[2] for camera in cameras.values()], axis=0)
+        front -= np.dot(front, up) * up
+        length = np.linalg.norm(front)
+        if length > 1e-8:
+            front /= length
+            transform[:3, :3] = [np.cross(up, front), up, front]
+        else:
+            from trimesh.geometry import align_vectors
+
+            transform = align_vectors(up, [0, 1, 0])
+    transform[:3, :3] *= scale_m_per_unit or 1.0
+    return transform
+
+
 def estimate_up(cameras):
     """Fit an up vector perpendicular to camera-right axes in upright views."""
     result = {"status": "manual_required", "source": "camera_poses",
