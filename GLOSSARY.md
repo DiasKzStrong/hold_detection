@@ -43,3 +43,6 @@ _Avoid_: 3D image, scan
 An asserted relationship between a Hold Observation and a Physical Hold in the
 Reconstructed Wall Model.
 _Avoid_: Classification, color match
+
+**Analysis Job**:
+A submitted Wall Capture with a processing status and an eventual result or failure.

@@ -10,6 +10,11 @@ types, and measured hold colors. Both export `scene.json` for the downstream gra
 Select a GPU runtime, set `MODE` and the input paths, and provide ready checkpoints.
 See [the module map, CLI, and SLURM instructions](docs/wall-pipeline.md).
 
+## Mobile demo API
+
+Upload a photo or video, poll analysis status, and download the scene and 3D wall.
+See the [HTTP API setup and contract](docs/demo-api.md).
+
 ## Comparison experiment
 
 The [YOLO11s and SAM 3 notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/experiments/DeMoSearch_SAM3_Colab.ipynb)
