@@ -140,6 +140,7 @@ dependencies = [
     { name = "numpy" },
     { name = "pillow" },
     { name = "pillow-heif" },
+    { name = "pyyaml" },
     { name = "scipy" },
     { name = "torch", version = "2.7.1", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform == 'darwin'" },
     { name = "torch", version = "2.7.1+cpu", source = { registry = "https://download.pytorch.org/whl/cpu" }, marker = "sys_platform != 'darwin'" },
@@ -151,6 +152,8 @@ dependencies = [
 
 [package.metadata]
 requires-dist = [
+    { name = "fastapi", marker = "extra == 'dev'", specifier = ">=0.115,<1" },
+    { name = "httpx", marker = "extra == 'dev'", specifier = ">=0.28,<1" },
     { name = "huggingface-hub", marker = "extra == 'training'", specifier = "==2.2.0" },
     { name = "ipywidgets", marker = "extra == 'dev'", specifier = "==8.1.8" },
     { name = "nbformat", marker = "extra == 'dev'", specifier = "==5.10.4" },
@@ -160,6 +163,8 @@ requires-dist = [
     { name = "pillow-heif", specifier = "==1.8.1" },
     { name = "pycocotools", marker = "extra == 'dev'", specifier = "==2.0.11" },
     { name = "pytest", marker = "extra == 'dev'", specifier = "==8.4.2" },
+    { name = "python-multipart", marker = "extra == 'dev'", specifier = ">=0.0.22,<1" },
+    { name = "pyyaml", specifier = ">=6,<7" },
     { name = "safetensors", marker = "extra == 'training'", specifier = ">=0.8,<1" },
     { name = "scipy", specifier = ">=1.14,<2" },
     { name = "torch", marker = "sys_platform != 'linux' and sys_platform != 'win32'", specifier = "==2.7.1" },
