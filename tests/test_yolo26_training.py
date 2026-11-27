@@ -15,7 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def training_module():
-    from hold_detection import yolo_training
+    from hold_detection.training import yolo26 as yolo_training
     return yolo_training
 
 
@@ -92,7 +92,7 @@ def test_pipeline_notebook_uses_ready_models_without_training_commands():
         assert command not in executable
     assert "segment-capture" in executable and "export-wall" in executable
     entrypoint = (ROOT / "scripts/train_yolo26.py").read_text()
-    assert "from hold_detection.yolo_training import main" in entrypoint
+    assert "from hold_detection.training.yolo26 import main" in entrypoint
     assert "def train_yolo26" not in entrypoint
 
 

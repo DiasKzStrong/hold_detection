@@ -1,6 +1,6 @@
 # Supervised crop classifiers: ResNet18 and SigLIP
 
-[Open the training notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Classifier_Training.ipynb).
+[Open the training notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/experiments/DeMoSearch_Classifier_Training.ipynb).
 For full training with the course allocation, see [NYU Cloud Bursting / SLURM](nyu-hpc.md).
 
 The models solve **crop classification**, not hold detection:

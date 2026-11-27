@@ -7,7 +7,7 @@ from pathlib import Path
 
 from PIL import Image, ImageOps
 
-from .pipeline import collect_images
+from .images import collect_images
 
 VIDEO_EXTENSIONS = {".mp4", ".mov", ".m4v", ".avi", ".mkv", ".webm"}
 
@@ -99,7 +99,7 @@ def prepare_capture(source, output, mode="2d", max_frames=48, video_stride_secon
         kind = "video"
     else:
         if source.suffix.lower() == ".zip":
-            from .colab_support import prepare_inputs
+            from .inputs import prepare_inputs
             prepared = prepare_inputs([source], output / "extracted")
             paths = collect_images(prepared.source)
         else:

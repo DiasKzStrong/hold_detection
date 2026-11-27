@@ -6,8 +6,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
-from .geometry import TYPES
-from .pipeline import collect_images
+from ..perception.geometry import TYPES
+from ..capture.images import collect_images
 
 
 def classification_metrics(truth: list[int], predicted: list[int]) -> dict:

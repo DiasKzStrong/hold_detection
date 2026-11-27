@@ -2,7 +2,7 @@
 
 import numpy as np
 
-from .reconstruction import colmap_depth_path, read_colmap_depth, reference_camera_points
+from .colmap import colmap_depth_path, read_colmap_depth, reference_camera_points
 
 
 def glb_frame_transform(up, cameras, scale_m_per_unit):

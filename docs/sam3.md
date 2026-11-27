@@ -6,7 +6,7 @@ CNN optionally assigns grip types afterward. SAM's concept score is not a grip
 type score, and neither score is calibrated accuracy.
 
 For Google Colab, use the comparison
-[DeMoSearch_SAM3_Colab.ipynb](../notebooks/DeMoSearch_SAM3_Colab.ipynb).
+[DeMoSearch_SAM3_Colab.ipynb](../notebooks/experiments/DeMoSearch_SAM3_Colab.ipynb).
 It checks out the public project repository and compares YOLO with SAM on the
 same frames, with interactive figures and optional COCO ground-truth metrics.
 See [notebook controls and evaluation protocol](colab.md). Its GPU setup and

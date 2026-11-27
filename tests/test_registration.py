@@ -4,7 +4,7 @@ import numpy as np
 import pytest
 import trimesh
 
-from hold_detection.registration import (
+from hold_detection.legacy.registration import (
     load_glb_vertices,
     match_points_to_glb,
     transform_points,

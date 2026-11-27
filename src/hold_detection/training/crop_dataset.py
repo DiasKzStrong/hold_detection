@@ -11,9 +11,9 @@ from zipfile import ZipFile
 
 from PIL import Image
 
-from .geometry import TYPES, canonical_type, crop_box
-from .pipeline import IMAGE_EXTENSIONS
-from .polycam import inspect_archive
+from ..perception.geometry import TYPES, canonical_type, crop_box
+from ..capture.images import IMAGE_EXTENSIONS
+from ..capture.polycam import inspect_archive
 
 
 def read_json(path):

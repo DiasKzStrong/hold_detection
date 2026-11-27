@@ -2,10 +2,11 @@ import json
 
 import numpy as np
 from PIL import Image
+import pytest
 import trimesh
 
 from hold_detection.cli import main
-from hold_detection.wall_orientation import estimate_up
+from hold_detection.reconstruction.orientation import estimate_up
 
 
 def test_upright_camera_poses_recover_vertical_despite_pitch():
@@ -37,11 +38,12 @@ def test_manual_vertical_reexports_existing_holds_and_rejects_invalid_depth(tmp_
     model = tmp_path / "camera_model"
     model.mkdir()
     (model / "cameras.txt").write_text("1 PINHOLE 32 24 16 16 16 12\n")
-    (model / "images.txt").write_text("1 1 0 0 0 0 0 0 1 frame.jpg\n\n")
-    depth = tmp_path / "frame.jpg.photometric.bin"
+    (model / "images.txt").write_text("1 1 0 0 0 0 0 0 1 frame.png\n\n")
+    depth = tmp_path / "frame.png.photometric.bin"
     values = np.full((24, 32), 2.0, dtype="<f4")
     values[2, 2] = 0
     depth.write_bytes(b"32&24&1&" + values.tobytes())
+    Image.new("RGB", (32, 24), (30, 60, 120)).save(tmp_path / "frame.png")
     mesh = tmp_path / "wall.ply"
     source_mesh = trimesh.creation.box(extents=[1, 3, 0.2]).apply_translation([0, -0.75, 2])
     source_mesh.export(mesh)
@@ -62,7 +64,7 @@ def test_manual_vertical_reexports_existing_holds_and_rejects_invalid_depth(tmp_
         holds.append({"hold_id": f"h{index}", "mask_path": mask, "detector_score": 0.9,
                       "bbox_xyxy": [12, top, 15, top + 3]})
     (frame_path / "holds.json").write_text(json.dumps({
-        "frame_id": "frame_00000", "source_image": str(tmp_path / "frame.jpg"),
+        "frame_id": "frame_00000", "source_image": str(tmp_path / "frame.png"),
         "processed_size_wh": [32, 24], "holds": holds,
     }))
 
@@ -71,10 +73,11 @@ def test_manual_vertical_reexports_existing_holds_and_rejects_invalid_depth(tmp_
     assert main(args) == 0
     original = json.loads(scene_path.read_text())
     assert original["wall"]["up_orientation"]["status"] == "manual_required"
+    assert original["up_axis"] is None and original["wall_bottom_height"] is None
     assert all(hold["height_3d"] is None for hold in original["holds"])
 
     reference = tmp_path / "up_reference.json"
-    clicks = {"image": "frame.jpg", "bottom_px": [16, 18], "top_px": [16, 4]}
+    clicks = {"image": "frame.png", "bottom_px": [16, 18], "top_px": [16, 4]}
     reference.write_text(json.dumps(clicks))
     assert main(args + ["--up-reference", str(reference)]) == 0
     calibrated = scene_path.read_text()
@@ -85,7 +88,11 @@ def test_manual_vertical_reexports_existing_holds_and_rejects_invalid_depth(tmp_
     assert [h["id"] for h in scene["holds"]] == [h["id"] for h in original["holds"]]
     low, high = scene["holds"]
     assert high["height_3d"] > low["height_3d"]
-    assert high["height_m"] == 0.5 * high["height_3d"]
+    assert scene["schema_version"] == "5.0"
+    assert scene["units"] == "meters" and scene["up_axis"] == "y"
+    assert scene["height_reference"] == "mesh_bottom_percentile"
+    assert scene["wall_bottom_height"] == pytest.approx(-0.375)
+    assert scene["wall_bottom_raw_min"] == pytest.approx(-0.375)
     assert scene["wall"]["glb_up_axis"] == "y"
     upright = tmp_path / "wall_upright.glb"
     assert scene["wall"]["glb_path"] == str(upright)
@@ -93,11 +100,23 @@ def test_manual_vertical_reexports_existing_holds_and_rejects_invalid_depth(tmp_
     aligned_mesh = trimesh.load_mesh(upright, process=False)
     np.testing.assert_allclose(aligned_mesh.vertices, trimesh.transform_points(source_mesh.vertices, transform))
     assert high["position_glb"][1] > low["position_glb"][1]
-    np.testing.assert_allclose(high["position_glb"][1], high["height_m"])
+    assert scene["source_file"] == upright.name
+    assert scene["wall_object"] in trimesh.load_scene(upright).graph.nodes_geometry
+    assert high["position"] == high["position_glb"]
+    assert high["height_m"] == pytest.approx(high["position"][1] + 0.375)
+    assert high["wall_kind"] == "vertical"
+    assert high["mean_color"] == [30, 60, 120]
+    assert all("color_group_id" not in hold for hold in scene["holds"])
+    assert all("color_group_id" not in obs for obs in scene["observations"])
+    assert all(obs["mean_color_source"] == "mask" for obs in scene["observations"])
+    np.testing.assert_allclose(high["footprint_m"], [0.125, 0.125])
+    np.testing.assert_allclose(high["wall_normal"], [0, 0, 1], atol=1e-7)
+    assert high["grip_area_m2"] is None and high["edge_depth_m"] is None
+    assert "grip_surface_metrics_unavailable" in high["flags"]
     match = high["mesh_correspondence"]
     np.testing.assert_allclose(match["position_glb"], aligned_mesh.vertices[match["vertex_index"]])
     assert raw_glb.read_bytes() == raw_bytes
-    assert (tmp_path / "wall_scene.json").read_text() == calibrated
+    assert not (tmp_path / "wall_scene.json").exists()
 
     reference.write_text(json.dumps(dict(clicks, top_px=[2, 2])))
     assert main(args + ["--up-reference", str(reference)]) == 1
@@ -113,3 +132,13 @@ def test_manual_vertical_reexports_existing_holds_and_rejects_invalid_depth(tmp_
     assert auto["wall"]["glb_path"] == str(upright)
     np.testing.assert_allclose(auto["wall"]["reconstruction_to_glb"], transform, atol=1e-7)
     assert raw_glb.read_bytes() == raw_bytes
+
+    unscaled = json.loads(reconstruction.read_text())
+    unscaled.update(units="arbitrary", scale_m_per_unit=None)
+    reconstruction.write_text(json.dumps(unscaled))
+    assert main(args) == 0
+    scene = json.loads(scene_path.read_text())
+    hold = scene["holds"][1]
+    assert scene["units"] == "arbitrary" and scene["up_axis"] == "y"
+    assert hold["height_m"] is None and hold["footprint_m"] is None
+    assert hold["height_from_wall_bottom"] == pytest.approx(2 * high["height_m"])

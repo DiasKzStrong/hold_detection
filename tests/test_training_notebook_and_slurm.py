@@ -11,7 +11,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_training_notebook_is_readable_valid_and_deterministic(monkeypatch):
-    path = ROOT / "notebooks/DeMoSearch_Classifier_Training.ipynb"
+    path = ROOT / "notebooks/experiments/DeMoSearch_Classifier_Training.ipynb"
     notebook = nbformat.read(path, as_version=4)
     nbformat.validate(notebook)
     for cell in notebook.cells:

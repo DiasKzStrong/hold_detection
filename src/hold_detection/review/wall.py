@@ -5,9 +5,8 @@ from pathlib import Path
 import numpy as np
 from PIL import Image, ImageDraw, ImageFont
 
-from .pipeline import COLORS
-from .scene import ROUTE_COLORS
-from .visualization import processed_image
+from ..capture.images import processed_image
+from ..perception.inference import COLORS
 
 
 GEOMETRY_COLORS = {"multi_view": "#34d399", "single_view": "#fbbf24", "unmapped": "#94a3b8"}
@@ -27,8 +26,6 @@ def render_frame_overlay(run, frame, scene, labels, color_by="type", selected_ho
     ratio_x, ratio_y = original.width / width, original.height / height
     overlay = original.copy()
     by_observation = {obs_id: hold for hold in scene["holds"] for obs_id in hold["observation_ids"]}
-    groups = sorted({hold["color_group_id"] for hold in scene["holds"] if hold["color_group_id"]})
-    group_colors = {group: ROUTE_COLORS[i % len(ROUTE_COLORS)] for i, group in enumerate(groups)}
     annotations = []
     for observation in scene["observations"]:
         if observation["frame_id"] != frame["frame_id"]:
@@ -37,8 +34,9 @@ def render_frame_overlay(run, frame, scene, labels, color_by="type", selected_ho
         if selected_hold is not None and hold["id"] != selected_hold:
             continue
         color = COLORS.get(hold["hold_type"], UNKNOWN_COLOR)
-        if color_by == "group":
-            color = group_colors.get(hold["color_group_id"], UNKNOWN_COLOR)
+        if color_by == "observed":
+            rgb = observation.get("mean_color") or hold.get("mean_color") or hold.get("color_rgb")
+            color = tuple(round(channel) for channel in rgb) if rgb is not None else UNKNOWN_COLOR
         if color_by == "geometry":
             color = GEOMETRY_COLORS[hold["geometry_status"]]
         if observation["mask_path"]:
@@ -99,8 +97,9 @@ def wall_mesh_figure(scene, labels, face_budget=120_000):
                 for axis, values in enumerate(links):
                     values.extend([center[axis], anchor[axis], None])
             points.append(anchor)
-            height = hold.get("height_3d")
-            height_text = f"<br>Relative height: {height * scale:.3g} {scene['wall']['units']}" if height is not None else ""
+            height = hold.get("height_from_wall_bottom")
+            units = scene["wall"]["units"]
+            height_text = f"<br>Height from scanned wall bottom: {height:.3g} {units}" if height is not None else ""
             captions.append(f"{labels[hold['id']]} · {hold['hold_type']}"
                             f"<br>{hold['observation_count']} view(s){height_text}{distance}")
         if points:

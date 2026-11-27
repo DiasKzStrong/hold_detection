@@ -1,12 +1,11 @@
-"""Portable input/bundle helpers used by the standalone Colab notebook."""
+"""Stage photo archives and uploaded images for capture analysis."""
 
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 import shutil
-from zipfile import ZIP_DEFLATED, ZipFile
+from zipfile import ZipFile
 
-from .gallery import build_gallery
-from .pipeline import IMAGE_EXTENSIONS, collect_images
+from .images import IMAGE_EXTENSIONS, collect_images
 from .polycam import inspect_archive, prepare_archive
 
 
@@ -93,19 +92,3 @@ def prepare_inputs(paths: list[Path], workspace: Path) -> PreparedInput:
         name = path.name if unique_names else f"{index:04d}_{path.name}"
         shutil.copy2(path, workspace / name)
     return PreparedInput(workspace, "photos", len(paths))
-
-
-def bundle_results(run: Path, destination: Path) -> Path:
-    if destination.resolve().is_relative_to(run.resolve()):
-        raise ValueError("Save the result ZIP outside the run directory")
-    build_gallery(run)
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    with ZipFile(destination, "x", compression=ZIP_DEFLATED) as z:
-        for path in sorted(run.rglob("*")):
-            if path.is_symlink():
-                raise ValueError("Do not bundle symlinks in a result directory")
-            if path.is_file():
-                if not path.resolve().is_relative_to(run.resolve()):
-                    raise ValueError("Result file escapes its run directory")
-                z.write(path, arcname=run.name + "/" + path.relative_to(run).as_posix())
-    return destination

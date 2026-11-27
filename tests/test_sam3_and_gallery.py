@@ -8,12 +8,12 @@ from PIL import Image
 import pytest
 import torch
 
-from hold_detection.assets import sha256
+from hold_detection.perception.assets import sha256
 from hold_detection.cli import main, parser
-from hold_detection.gallery import asset_url, build_gallery
-from hold_detection.geometry import Detection
-from hold_detection.pipeline import make_hold_record, run_inference
-from hold_detection.sam3_backend import Sam3Detector, decode_predictions, fetch_checkpoint
+from hold_detection.review.gallery import asset_url, build_gallery
+from hold_detection.perception.geometry import Detection
+from hold_detection.perception.inference import make_hold_record, run_inference
+from hold_detection.perception.sam3_backend import Sam3Detector, decode_predictions, fetch_checkpoint
 
 
 def predictions():

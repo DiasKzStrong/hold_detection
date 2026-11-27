@@ -6,13 +6,14 @@ import numpy as np
 from PIL import Image
 import pytest
 
-from hold_detection.assets import ASSETS, download_asset
+from hold_detection.perception.assets import ASSETS, download_asset
 from hold_detection.cli import main, parser
-from hold_detection.evaluation import classification_metrics, evaluate_crops
-from hold_detection.geometry import Detection, box_iou, canonical_type, crop_box, merge_detections, tile_windows
-from hold_detection.pipeline import collect_images, make_hold_record, run_inference
-from hold_detection.polycam import GROUPS, inspect_archive, prepare_archive
-from hold_detection.wall_bundle import inspect_wall_bundle, prepare_wall_bundle
+from hold_detection.training.evaluation import classification_metrics, evaluate_crops
+from hold_detection.perception.geometry import Detection, box_iou, canonical_type, crop_box, merge_detections, tile_windows
+from hold_detection.capture.images import collect_images
+from hold_detection.perception.inference import make_hold_record, run_inference
+from hold_detection.capture.polycam import GROUPS, inspect_archive, prepare_archive
+from hold_detection.capture.wall_bundle import inspect_wall_bundle, prepare_wall_bundle
 
 
 def test_nms_merges_type_disagreement_but_keeps_hold_on_volume():

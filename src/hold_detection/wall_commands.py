@@ -89,22 +89,22 @@ def add_wall_commands(commands):
 
 def dispatch_wall_command(args):
     implementations = {
-        "download-yolo": ("yolo_training", "download_roboflow_dataset"),
-        "match-annotated-glb": ("correspondence", "match_annotated_glb"),
-        "prepare-yolo": ("yolo_training", "prepare_yolo_dataset"),
-        "train-yolo": ("yolo_training", "train_yolo26"),
-        "evaluate-yolo": ("yolo_training", "evaluate_yolo26"),
+        "download-yolo": ("training.yolo26", "download_roboflow_dataset"),
+        "match-annotated-glb": ("scene.correspondence", "match_annotated_glb"),
+        "prepare-yolo": ("training.yolo26", "prepare_yolo_dataset"),
+        "train-yolo": ("training.yolo26", "train_yolo26"),
+        "evaluate-yolo": ("training.yolo26", "evaluate_yolo26"),
         "prepare-capture": ("capture", "prepare_capture"),
         "reconstruct-wall": ("reconstruction", "reconstruct_wall"),
-        "segment-capture": ("wall_pipeline", "segment_capture"),
-        "export-wall": ("wall_scene", "export_wall_scene"),
+        "segment-capture": ("perception.segmentation", "segment_capture"),
+        "export-wall": ("scene", "export_wall_scene"),
         "analyze-wall": ("wall_pipeline", "analyze_wall"),
     }
     if args.command not in implementations:
         return None
     from importlib import import_module
-    from .wall_pipeline import PipelinePaused
-    from .yolo_training import TrainingPaused
+    from .perception.segmentation import PipelinePaused
+    from .training.yolo26 import TrainingPaused
     module, name = implementations[args.command]
     parameters = vars(args).copy()
     parameters.pop("command")

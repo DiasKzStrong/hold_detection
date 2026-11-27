@@ -5,7 +5,7 @@ from pathlib import Path
 from textwrap import dedent
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "notebooks" / "DeMoSearch_SAM3_Colab.ipynb"
+OUTPUT = ROOT / "notebooks" / "experiments" / "DeMoSearch_SAM3_Colab.ipynb"
 
 
 def cell(kind, name, source, hidden=False):
@@ -20,14 +20,11 @@ def cell(kind, name, source, hidden=False):
 def build_notebook():
     cells = [
         cell("markdown", "intro", """
-            # DeMoSearch · 2D and 3D wall analysis
-            **One selected wall section → detected holds → planner-ready wall data.**
+            # DeMoSearch · YOLO and SAM 3 comparison
 
-            The notebook has two analysis modes. **2D** accepts a photo and exports normalized
-            image positions. **3D** accepts a multi-view Polycam wall bundle and additionally
-            fuses observations in metric capture space and maps them to its GLB when registration
-            succeeds. It does not generate a climbing route: `wall_scene.json` is the input for a
-            separate graph-based route algorithm.
+            Compare hold detection on the same images with optional COCO annotations.
+            A prepared Polycam wall bundle also exposes RGB-D and GLB registration diagnostics.
+            For the current graph algorithm export, use [DeMoSearch_Pipeline.ipynb](../DeMoSearch_Pipeline.ipynb).
 
             | Experiment | Localization | Route evidence |
             |:---|:---|:---|
@@ -97,7 +94,7 @@ def build_notebook():
         cell("code", "upload-inputs", """
             # @title Load photos
             from google.colab import files, drive
-            from hold_detection.colab_support import prepare_inputs
+            from hold_detection.capture.inputs import prepare_inputs
 
             INPUT_MODE = 'upload'  # @param ["upload", "drive"]
             DRIVE_INPUT = '/content/drive/MyDrive/DeMoSearch/wallA_slab_right1'  # @param {type: "string"}
@@ -126,7 +123,6 @@ def build_notebook():
                 print('GLB:', prepared.metadata['prepared_glb'])
         """, hidden=True),
         cell("code", "settings", """
-            REQUESTED_ANALYSIS_MODE = 'auto'  # @param ["auto", "2d", "3d"]
             MAX_IMAGES = 3       # @param {type: "integer"}
             ROTATE = -1          # @param {type: "integer"}
             RUN_SAM3 = True      # @param {type: "boolean"}
@@ -135,12 +131,6 @@ def build_notebook():
             CANDIDATE_FLOOR = 0.05    # @param {type: "number"}
             YOLO_THRESHOLD = 0.35    # @param {type: "number"}
             SAM_THRESHOLD = 0.50     # @param {type: "number"}
-            if REQUESTED_ANALYSIS_MODE not in {'auto', '2d', '3d'}:
-                raise ValueError("REQUESTED_ANALYSIS_MODE must be 'auto', '2d' or '3d'.")
-            detected_mode = '3d' if prepared.kind in {'polycam', 'wall_bundle'} else '2d'
-            ANALYSIS_MODE = detected_mode if REQUESTED_ANALYSIS_MODE == 'auto' else REQUESTED_ANALYSIS_MODE
-            if ANALYSIS_MODE == '3d' and prepared.kind not in {'polycam', 'wall_bundle'}:
-                raise ValueError('3D analysis requires a Polycam RGB-D capture or complete wall bundle.')
             if MAX_IMAGES < 0 or ROTATE not in (-1, 0, 90, 180, 270):
                 raise ValueError('MAX_IMAGES must be >= 0; ROTATE must be -1, 0, 90, 180 or 270.')
             if not all(0 <= v <= 1 for v in [CANDIDATE_FLOOR, YOLO_THRESHOLD, SAM_THRESHOLD]):
@@ -152,8 +142,7 @@ def build_notebook():
             EXPERIMENT = PROJECT / 'runs' / ('comparison_' + experiment_id)
             EXPERIMENT.mkdir(parents=True, exist_ok=False)
             RUNS, THRESHOLDS = {}, {}
-            print('Analysis mode:', ANALYSIS_MODE.upper(), '| rotation:', rotation,
-                  '| images:', MAX_IMAGES or 'all')
+            print('Capture:', prepared.kind, '| rotation:', rotation, '| images:', MAX_IMAGES or 'all')
         """),
         cell("markdown", "protocol-note", """
             `MAX_IMAGES=0` selects all frames. `ROTATE=-1` means 90° for our Polycam scan
@@ -165,7 +154,7 @@ def build_notebook():
             import matplotlib.pyplot as plt
             from PIL import Image
             from IPython.display import display, HTML
-            from hold_detection.pipeline import collect_images
+            from hold_detection.capture.images import collect_images
 
             image_paths = collect_images(SOURCE)
             selected_paths = image_paths[:MAX_IMAGES] if MAX_IMAGES else image_paths
@@ -194,7 +183,7 @@ def build_notebook():
             run_holds(*args, log_name='yolo_inference')
             RUNS['YOLO11s'] = yolo_path
             THRESHOLDS['YOLO11s'] = YOLO_THRESHOLD
-            from hold_detection.visualization import plot_comparison
+            from hold_detection.review.visualization import plot_comparison
             display(plot_comparison(RUNS, thresholds=THRESHOLDS)); plt.close('all')
         """),
         cell("markdown", "sam-heading", """
@@ -257,80 +246,15 @@ def build_notebook():
                         print('For CUDA out-of-memory errors, try a larger GPU.')
         """),
         cell("markdown", "wall-scene-heading", """
-            ## 5 · Unified wall-scene contract
-            Both modes end at the same seam: a versioned JSON document for the downstream
-            graph algorithm. In 2D, each frame-local Hold Observation has normalized image
-            coordinates. In 3D, repeated observations are fused into Physical Holds with metric
-            coordinates. Human semantic fields are present but default to `unknown`; a future UI
-            can edit them without changing hold identities. No route or beta is generated here.
-        """),
-        cell("code", "wall-scene-contract", """
-            # This pure adapter is intentionally visible: it is the hand-off to the route algorithm.
-            def build_downstream_wall_scene(scene, analysis_mode):
-                if analysis_mode not in {'2d', '3d'}:
-                    raise ValueError("analysis_mode must be '2d' or '3d'")
-
-                annotation_defaults = {
-                    'hold_type': 'unknown',
-                    'opening_direction': 'unknown',
-                    'is_start': False,
-                    'is_finish': False,
-                }
-                observations = []
-                for frame in scene.get('frames', []):
-                    width, height = frame['processed_size_wh']
-                    for item in frame.get('hold_observations', []):
-                        hold = dict(item)
-                        x1, y1, x2, y2 = hold['bbox_xyxy']
-                        hold['position_2d_normalized'] = [
-                            round((x1 + x2) / (2 * width), 6),
-                            round((y1 + y2) / (2 * height), 6),
-                        ]
-                        hold['human_annotations'] = dict(annotation_defaults)
-                        observations.append(hold)
-
-                if analysis_mode == '3d':
-                    holds = []
-                    for item in scene.get('physical_holds', []):
-                        hold = dict(item)
-                        hold['human_annotations'] = dict(annotation_defaults)
-                        holds.append(hold)
-                else:
-                    holds = observations
-
-                reconstruction = dict(scene.get('reconstruction', {}))
-                if reconstruction.get('glb_registration') == 'registered':
-                    spatial_status = 'glb_registered'
-                elif analysis_mode == '3d' and holds:
-                    spatial_status = 'capture_space_only'
-                else:
-                    spatial_status = 'not_available'
-
-                return {
-                    'schema_version': '1.0-notebook',
-                    'source_scene_schema_version': scene.get('schema_version'),
-                    'wall_capture_id': scene.get('wall_capture_id'),
-                    'analysis_mode': analysis_mode,
-                    'planner_input_only': True,
-                    'coordinate_convention': (
-                        'metric_3d_when_available' if analysis_mode == '3d'
-                        else 'normalized_image_xy'
-                    ),
-                    'spatial_status': spatial_status,
-                    'reconstruction': reconstruction,
-                    'route_candidates': scene.get('route_candidates', []),
-                    'hold_observations': observations,
-                    'holds': holds,
-                }
+            ## 5 · Color and Polycam diagnostics
+            Inspect the draft scene for this experiment, including the RGB-D holds and
+            registration status when a Polycam wall bundle is supplied.
         """),
         cell("code", "scene-summary", """
-            # @title Export holds and spatial information for the graph algorithm
+            # @title Inspect color groups and Polycam spatial evidence
             import pandas as pd
             scene_run = RUNS.get('SAM 3', RUNS['YOLO11s'])
             scene = json.loads((scene_run / 'scene.json').read_text())
-            wall_scene = build_downstream_wall_scene(scene, ANALYSIS_MODE)
-            wall_scene_path = scene_run / 'wall_scene.json'
-            wall_scene_path.write_text(json.dumps(wall_scene, indent=2, allow_nan=False) + '\\n')
             spatial = scene['reconstruction']
             print('Route candidates:', len(scene['route_candidates']))
             print('Physical holds:', len(scene['physical_holds']))
@@ -344,7 +268,7 @@ def build_notebook():
             print('GLB:', spatial.get('glb_path') or 'not supplied')
             if scene['physical_holds']:
                 display(pd.DataFrame(scene['physical_holds']).head(20))
-            print('Downstream graph input:', wall_scene_path)
+            print('Draft experiment scene:', scene_run / 'scene.json')
             display(HTML(f'<a href="{scene_run / "index.html"}" target="_blank">Open offline review gallery</a>'))
         """),
         cell("markdown", "viewer-heading", """
@@ -355,7 +279,7 @@ def build_notebook():
         cell("code", "viewer", """
             from google.colab import output
             output.enable_custom_widget_manager()
-            from hold_detection.visualization import ComparisonViewer, plot_crop_grid
+            from hold_detection.review.visualization import ComparisonViewer, plot_crop_grid
 
             viewer = ComparisonViewer(RUNS, THRESHOLDS)
             display(viewer.widget)
@@ -422,7 +346,7 @@ def build_notebook():
         """),
         cell("code", "metrics", """
             import pandas as pd
-            from hold_detection.visualization import metric_rows, plot_diagnostics, plot_quality
+            from hold_detection.review.visualization import metric_rows, plot_diagnostics, plot_quality
 
             REPORT_DIR = EXPERIMENT / ('report_' + uuid.uuid4().hex[:6])
             args = ['benchmark', '--output', REPORT_DIR, '--gt-coordinates', GT_COORDINATES, '--max-det', 500]
@@ -460,7 +384,7 @@ def build_notebook():
             Extract the entire folder and open `report_…/index.html`.
         """),
         cell("code", "export", """
-            from zipfile import ZipFile, ZIP_DEFLATED
+            from hold_detection.review.gallery import bundle_results
 
             session = {'source_commit': CODE_SHA, 'sam3_requested': RUN_SAM3, 'sam3_ready': SAM_READY,
                        'runtime': runtime_info(PYTHON, PROJECT),
@@ -468,10 +392,7 @@ def build_notebook():
                        'latest_report': str(REPORT_DIR.relative_to(EXPERIMENT))}
             (EXPERIMENT / 'session.json').write_text(json.dumps(session, indent=2))
             RESULT_ZIP = WORK / (EXPERIMENT.name + '_' + uuid.uuid4().hex[:6] + '.zip')
-            with ZipFile(RESULT_ZIP, 'x', compression=ZIP_DEFLATED) as archive:
-                for path in sorted(EXPERIMENT.rglob('*')):
-                    if path.is_symlink(): raise ValueError('Result symlinks are not bundled')
-                    if path.is_file(): archive.write(path, EXPERIMENT.name + '/' + path.relative_to(EXPERIMENT).as_posix())
+            bundle_results(EXPERIMENT, RESULT_ZIP)
             print('Open after extraction:', REPORT_DIR.relative_to(EXPERIMENT) / 'index.html')
             files.download(str(RESULT_ZIP))
         """),

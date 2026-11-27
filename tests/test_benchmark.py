@@ -8,10 +8,10 @@ import numpy as np
 from PIL import Image
 import pytest
 
-from hold_detection.benchmark import compare_runs, detection_matches, rotate_box
-from hold_detection.geometry import Detection
-from hold_detection.pipeline import run_inference
-from hold_detection.visualization import ComparisonViewer, plot_comparison, plot_crop_grid, write_report
+from hold_detection.review.benchmark import compare_runs, detection_matches, rotate_box
+from hold_detection.perception.geometry import Detection
+from hold_detection.perception.inference import run_inference
+from hold_detection.review.visualization import ComparisonViewer, plot_comparison, plot_crop_grid, write_report
 
 
 class Detector:

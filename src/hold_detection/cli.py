@@ -249,20 +249,20 @@ def main(argv=None):
         if handled is not None:
             return handled
         if args.command == "fetch-models":
-            from .assets import ASSETS, download_asset
+            from .perception.assets import ASSETS, download_asset
 
             for name in ASSETS if args.model == "all" else [args.model]:
                 print(download_asset(name, args.output))
         elif args.command == "fetch-sam3":
-            from .sam3_backend import fetch_checkpoint
+            from .perception.sam3_backend import fetch_checkpoint
 
             print(fetch_checkpoint(args.output, args.revision))
         elif args.command == "sam3-doctor":
-            from .sam3_backend import doctor
+            from .perception.sam3_backend import doctor
 
             print(json.dumps(doctor(), indent=2))
         elif args.command == "fetch-encoders":
-            from .learned_classifier import build_classifier
+            from .training.learned_classifier import build_classifier
 
             names = (
                 ["resnet18", "siglip"]
@@ -274,7 +274,7 @@ def main(argv=None):
                 print(json.dumps(model.metadata, indent=2))
                 del model
         elif args.command == "prepare-crops":
-            from .crop_dataset import prepare_crops
+            from .training.crop_dataset import prepare_crops
 
             data = prepare_crops(
                 args.source,
@@ -298,7 +298,7 @@ def main(argv=None):
             )
         elif args.command in {"train-classifier", "extract-features"}:
             import torch
-            from .classifier_training import extract_features, train_classifier
+            from .training.classifier_training import extract_features, train_classifier
 
             torch.set_num_threads(args.threads)
             if args.command == "extract-features":
@@ -346,12 +346,12 @@ def main(argv=None):
                 if data["status"] == "interrupted":
                     return 75
         elif args.command == "gallery":
-            from .gallery import build_gallery
+            from .review.gallery import build_gallery
 
             print(build_gallery(args.run))
         elif args.command == "benchmark":
-            from .benchmark import compare_runs
-            from .visualization import write_report
+            from .review.benchmark import compare_runs
+            from .review.visualization import write_report
 
             paths = {name: Path(path) for name, path in args.run}
             thresholds = {name: float(value) for name, value in args.threshold}
@@ -370,7 +370,7 @@ def main(argv=None):
                 f"Comparison: {args.output / 'index.html'}; quality status: {report['quality_status']}"
             )
         elif args.command in {"inspect-polycam", "prepare-polycam"}:
-            from .polycam import inspect_archive, prepare_archive
+            from .capture.polycam import inspect_archive, prepare_archive
 
             info = (
                 inspect_archive(args.archive)
@@ -379,7 +379,7 @@ def main(argv=None):
             )
             print(json.dumps(info, indent=2))
         elif args.command in {"inspect-wall-bundle", "prepare-wall-bundle"}:
-            from .wall_bundle import inspect_wall_bundle, prepare_wall_bundle
+            from .capture.wall_bundle import inspect_wall_bundle, prepare_wall_bundle
 
             info = (
                 inspect_wall_bundle(args.directory)
@@ -389,13 +389,13 @@ def main(argv=None):
             print(json.dumps(info, indent=2))
         elif args.command == "evaluate-crops":
             import torch
-            from .assets import sha256
-            from .evaluation import evaluate_crops
-            from .models import CropClassifier
+            from .perception.assets import sha256
+            from .training.evaluation import evaluate_crops
+            from .perception.models import CropClassifier
 
             torch.set_num_threads(args.threads)
             if args.classifier == "trained":
-                from .learned_classifier import LearnedCropClassifier
+                from .training.learned_classifier import LearnedCropClassifier
 
                 classifier = LearnedCropClassifier(args.weights, args.device)
             else:
@@ -408,9 +408,10 @@ def main(argv=None):
             )
             print(json.dumps(report, indent=2))
         else:
-            from .assets import sha256
-            from .models import CropClassifier, HoldDetector, Sam2Segmenter
-            from .pipeline import collect_images, run_inference, validate_image_source
+            from .perception.assets import sha256
+            from .perception.models import CropClassifier, HoldDetector, Sam2Segmenter
+            from .capture.images import collect_images, validate_image_source
+            from .perception.inference import run_inference
 
             if args.overlap >= 1:
                 raise ValueError("Tile overlap must be less than 1")
@@ -421,7 +422,7 @@ def main(argv=None):
             validate_image_source(args.source)
             collect_images(args.source)
             if args.command == "sam3":
-                from .sam3_backend import Sam3Detector
+                from .perception.sam3_backend import Sam3Detector
 
                 hold_prompts = args.prompt or [
                     "climbing hold", "climbing grip", "climbing foothold",
@@ -439,7 +440,7 @@ def main(argv=None):
                     else None
                 )
             if args.classifier == "trained":
-                from .learned_classifier import LearnedCropClassifier
+                from .training.learned_classifier import LearnedCropClassifier
 
                 classifier = LearnedCropClassifier(args.classifier_weights, args.device)
             else:
@@ -454,7 +455,7 @@ def main(argv=None):
                 "device": detector.device,
             }
             if args.command == "sam3":
-                from .sam3_backend import SAM3_SOURCE_REVISION
+                from .perception.sam3_backend import SAM3_SOURCE_REVISION
 
                 metadata["detector"].update(
                     {

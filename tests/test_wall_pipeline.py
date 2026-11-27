@@ -1,8 +1,6 @@
 """Public wall-analysis stages with real images, depth and mesh files."""
 
 import json
-import importlib.util
-import ast
 import os
 from pathlib import Path
 import subprocess
@@ -12,32 +10,15 @@ import numpy as np
 from PIL import Image
 import pytest
 import trimesh
-import nbformat
 
-from hold_detection.capture import prepare_capture
-from hold_detection.geometry import Detection
-from hold_detection.pipeline import run_inference
-from hold_detection.reconstruction import colmap_depth_path, lift_mask, read_colmap_depth, read_colmap_cameras, reconstruct_wall, scale_from_reference
-from hold_detection.wall_scene import assign_type_proposals, build_wall_scene, export_wall_scene
+from hold_detection.capture.prepare import prepare_capture
+from hold_detection.perception.geometry import Detection
+from hold_detection.perception.inference import run_inference
+from hold_detection.reconstruction.colmap import colmap_depth_path, lift_mask, read_colmap_depth, read_colmap_cameras, reconstruct_wall, scale_from_reference
+from hold_detection.perception.hold_types import assign_type_proposals
+from hold_detection.scene.export import build_wall_scene, export_wall_scene
 
 ROOT = Path(__file__).resolve().parents[1]
-
-
-def test_wall_notebook_is_a_valid_thin_library_client(monkeypatch):
-    monkeypatch.syspath_prepend(str(ROOT / "scripts"))
-    spec = importlib.util.spec_from_file_location("wall_notebook", ROOT / "scripts/build_wall_notebook.py")
-    builder = importlib.util.module_from_spec(spec)
-    spec.loader.exec_module(builder)
-    path = ROOT / "notebooks/DeMoSearch_Wall_Analysis.ipynb"
-    notebook = nbformat.read(path, as_version=4)
-    nbformat.validate(notebook)
-    assert json.loads(path.read_text()) == builder.build_wall_notebook()
-    for cell in notebook.cells:
-        if cell.cell_type == "code":
-            ast.parse(cell.source)
-            assert cell.execution_count is None and cell.outputs == []
-    analysis = next(cell.source for cell in notebook.cells if cell.id == "analyze")
-    assert "analyze-wall" in analysis and "run_holds" in analysis
 
 
 def test_every_slurm_entrypoint_has_valid_shell_syntax():
@@ -49,7 +30,7 @@ def test_every_slurm_entrypoint_has_valid_shell_syntax():
 def observation(identity="one", frame="a", geometry=None):
     return {"id": identity, "frame_id": frame, "object_kind": "hold",
             "position_2d_normalized": [0.5, 0.5], "size_2d_normalized": [0.1, 0.1],
-            "color_rgb": [10, 20, 180], "color_group_id": "color_1",
+            "color_rgb": [10, 20, 180],
             "hold_type": "jug", "hold_type_confidence": 0.9,
             "hold_type_source": "yolo26_rgb_joint_score", "geometry": geometry}
 
@@ -171,11 +152,14 @@ def test_two_modes_share_schema_and_uncalibrated_3d_never_claims_meters():
     unmapped = observation("three", "c")
     two_d = build_wall_scene([first], "2d")
     three_d = build_wall_scene([first, second, unmapped], "3d", {"units": "arbitrary"})
+    assert set(two_d) == set(three_d)
     assert set(two_d["holds"][0]) == set(three_d["holds"][0])
     assert len(three_d["holds"]) == 2  # Same Physical Hold in two views, plus retained unmapped hold.
     assert three_d["holds"][0]["observation_count"] == 2
     assert three_d["holds"][0]["position_3d_m"] is None
     assert three_d["holds"][0]["volume_m3"] is None
+    assert three_d["holds"][1]["position"] is None
+    assert "unmapped_3d" in three_d["holds"][1]["flags"]
     assert three_d["review"]["unmapped_hold_count"] == 1
     # Even if an RGB-D fixture is supplied, 2D export must not leak 3D measurements.
     assert two_d["holds"][0]["position_3d"] is None
@@ -184,10 +168,16 @@ def test_two_modes_share_schema_and_uncalibrated_3d_never_claims_meters():
 def test_single_view_holds_and_human_type_corrections_are_not_discarded():
     scene = build_wall_scene([observation()], "2d")
     identity = scene["holds"][0]["id"]
-    corrected = build_wall_scene([observation()], "2d", annotations={identity: {"hold_type": "undercling", "is_start": True}})
+    corrected = build_wall_scene([observation()], "2d", annotations={
+        identity: {"hold_type": "undercling", "is_start": True, "is_top": True},
+    })
     assert corrected["holds"][0]["hold_type"] == "undercling"
     assert corrected["holds"][0]["hold_type_source"] == "human"
     assert corrected["holds"][0]["is_start"] is True
+    assert corrected["holds"][0]["is_top"] is True
+    assert corrected["holds"][0]["is_finish"] is True
+    assert corrected["start_hold_ids"] == [identity]
+    assert corrected["top_hold_id"] == identity
 
 
 def test_known_reference_recovers_scale_without_inventing_missing_depth():
@@ -246,7 +236,7 @@ else:
 
 
 def test_annotated_glb_matching_requires_alignment_and_keeps_stable_target_ids(tmp_path):
-    from hold_detection.correspondence import match_annotated_glb
+    from hold_detection.scene.correspondence import match_annotated_glb
     mesh = trimesh.Scene()
     mesh.add_geometry(trimesh.creation.box(), node_name="blue_v5_holds.004", geom_name="hold", transform=np.eye(4))
     mesh.export(tmp_path / "marked.glb")
@@ -263,8 +253,8 @@ def test_annotated_glb_matching_requires_alignment_and_keeps_stable_target_ids(t
 
 
 def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(tmp_path, monkeypatch):
-    from hold_detection import models
-    from hold_detection.wall_pipeline import segment_capture
+    from hold_detection.perception import models
+    from hold_detection.perception.segmentation import segment_capture
     source = tmp_path / "photo.jpg"
     Image.new("RGB", (20, 20), "blue").save(source)
     capture = tmp_path / "capture"
@@ -297,6 +287,13 @@ def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(t
     run = tmp_path / "run"
     segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=640)
     initial = export_wall_scene(run, "2d")
+    assert initial["units"] == "normalized_image" and initial["up_axis"] is None
+    assert initial["source_file"] == "frame_00000.jpg"
+    hold = initial["holds"][0]
+    assert hold["position"] == hold["position_2d_normalized"]
+    assert hold["height_m"] is None and hold["protrusion_m"] is None
+    assert hold["mean_color"] == [0, 0, 254]
+    assert "bbox_color_fallback" in hold["flags"]
     assert initial["holds"][0]["hold_type"] == "unknown"
     assert initial["review"]["type_assignment"]["unknown_observations_by_reason"]["below_type_min_score"] == 1
     assert initial["wall"]["input_crop"] == prepared["frames"][0]["input_crop"]
@@ -313,7 +310,13 @@ def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(t
     assert retuned["review"]["type_assignment"]["minimum_score"] == 0.35
     segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=640)
     assert export_wall_scene(run, "2d") == initial
+    assert "color_group_id" not in initial["holds"][0]
+    assert "color_group_id" not in initial["observations"][0]
+    assert initial["observations"][0]["mean_color"] == hold["mean_color"]
     assert (run / "inference/index.html").is_file()
+    assert (run / "scene.json").is_file()
+    assert not (run / "inference/scene.json").exists()
+    assert not (run / "wall_scene.json").exists()
     with pytest.raises(ValueError, match="settings changed"):
         segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=1024)
 
@@ -335,7 +338,7 @@ def test_batch_inference_can_resume_a_slice_without_finalizing(tmp_path):
     assert not (output / "scene.json").exists()
     scene = export_wall_scene(tmp_path / "run", "2d")
     assert len(scene["holds"]) == 1
-    assert (tmp_path / "run/scene.json").read_bytes() == (tmp_path / "run/wall_scene.json").read_bytes()
+    assert json.loads((tmp_path / "run/scene.json").read_text()) == scene
 
 
 @pytest.mark.parametrize("mode,stages", [("2d", ["prepare", "segment", "export"]),

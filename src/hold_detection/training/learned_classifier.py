@@ -9,8 +9,8 @@ from torch.nn import functional as F
 from torchvision import models, transforms
 from PIL import Image
 
-from .geometry import TYPES, crop_box
-from .models import resolve_device
+from ..perception.geometry import TYPES, crop_box
+from ..perception.models import resolve_device
 
 SIGLIP_MODEL = "google/siglip-base-patch16-224"
 

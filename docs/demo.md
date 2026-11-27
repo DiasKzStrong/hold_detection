@@ -1,12 +1,11 @@
-# Route perception demo
+# Legacy Polycam demo
 
-The demo is an offline-first vertical slice from a wall capture to reviewable
-route candidates and metric RGB-D spatial evidence. It does not claim that the
-capture coordinate frame is registered to the GLB.
+This experiment compares YOLO and SAM 3 on a prepared Polycam capture.
+Use the [wall pipeline guide](wall-pipeline.md) for the current 2D and 3D inference demo.
 
 ## Colab run
 
-1. Open `notebooks/DeMoSearch_SAM3_Colab.ipynb` in a GPU runtime.
+1. Open `notebooks/experiments/DeMoSearch_SAM3_Colab.ipynb` in a GPU runtime.
 2. Add an approved Hugging Face read token as the `HF_TOKEN` Colab secret.
 3. Select `drive` input and point `DRIVE_INPUT` at a photo directory or ZIP.
 4. Leave grip classification disabled; the notebook no longer exposes it in the main flow.
@@ -15,7 +14,7 @@ capture coordinate frame is registered to the GLB.
 
 Every inference run contains:
 
-- `scene.json`: draft planner input with frame-local observations and route candidates;
+- `scene.json` stores draft frame-local observations and route candidates.
 - `index.html`: portable review gallery;
 - `<frame>/routes.jpg`: color-grouped route visualization;
 - `<frame>/holds.json`: full frame-local evidence;

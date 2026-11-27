@@ -14,12 +14,12 @@ import torch
 from torch import nn
 from torch.utils.data import DataLoader, Dataset, TensorDataset
 
-from .assets import sha256
+from ..perception.assets import sha256
 from .crop_dataset import load_crops, manifest_digest, read_json, safe_path
 from .evaluation import classification_metrics
-from .geometry import TYPES
+from ..perception.geometry import TYPES
 from .learned_classifier import CropTransform, build_classifier, from_metadata
-from .models import resolve_device
+from ..perception.models import resolve_device
 
 
 def _provenance(device, gpus):
@@ -31,7 +31,7 @@ def _provenance(device, gpus):
             packages[name] = version(name)
         except PackageNotFoundError:
             packages[name] = None
-    root = Path(__file__).resolve().parents[2]
+    root = Path(__file__).resolve().parents[3]
     try:
         result = subprocess.run(
             ["git", "rev-parse", "HEAD"], cwd=root, capture_output=True, text=True

@@ -1,31 +1,38 @@
-# Wall perception: Python modules, CLI and SLURM
+# Wall perception
 
-| Module under src/hold_detection | Responsibility |
+| Module under `src/hold_detection/` | Responsibility |
 | --- | --- |
-| yolo_training.py | Roboflow download, dataset validation, YOLO26 training/evaluation |
-| capture.py | Oriented and bounded frames from one photo, photos/ZIP or video |
-| reconstruction.py | CUDA COLMAP SfM/MVS, camera/depth parsing, scale and trimesh GLB export |
-| wall_pipeline.py | Resumable per-frame SAM3 subprocesses and YOLO type assignment |
-| wall_scene.py | Multiview fusion, spatial estimates and common scene.json export |
-| correspondence.py | Matching to named annotated GLB holds with explicit frame alignment |
-| wall_commands.py | CLI arguments for these functions |
+| `capture/` | Prepare one photo, a photo set, or video. Apply EXIF orientation and optional 2D crop. |
+| `perception/` | Run SAM 3, assign YOLO type proposals, and measure observed hold colors. |
+| `reconstruction/` | Run CUDA COLMAP, read camera poses and depth, and resolve scale and up direction. |
+| `scene/` | Lift masks into 3D, fuse observations, export `scene.json`, and optionally match annotated GLB IDs. |
+| `review/` | Render masks, mesh markers, offline galleries and the Colab up picker. |
+| `training/` | Prepare labeled data and train or evaluate YOLO26 and the crop-classifier experiments. |
+| `legacy/` | Draft Polycam RGB-D fusion and registration for the comparison workflow. |
+| `cli.py`, `wall_commands.py`, `wall_pipeline.py` | Expose CLI stages and run the complete analysis. |
 
-Notebooks are optional inference clients. The complete inference notebook is edited directly
-as an .ipynb and uses existing SAM3/hold-type checkpoints; it contains no training steps.
-`scripts/train_yolo26.py` is a thin library entry point.
-[Complete inference in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Pipeline.ipynb).
-The older SAM3 comparison notebook remains the legacy YOLO11/Polycam comparison.
+Start with [DeMoSearch_Pipeline.ipynb](../notebooks/DeMoSearch_Pipeline.ipynb)
+or [open it in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Pipeline.ipynb).
+Its cells call the same CLI stages as SLURM. Edit the notebook directly and provide
+existing SAM 3 and YOLO checkpoints. The comparison and crop-classifier notebooks live
+in [notebooks/experiments](../notebooks/experiments). Train YOLO through
+`scripts/train_yolo26.py` or the [YOLO SLURM jobs](yolo26-training.md).
+
+Python callers can import `prepare_capture` from `hold_detection.capture`,
+`reconstruct_wall` from `hold_detection.reconstruction`, `segment_capture` from
+`hold_detection.perception.segmentation`, and `export_wall_scene` from
+`hold_detection.scene`. `hold_detection.wall_pipeline.analyze_wall` runs the full workflow.
 
 The inference notebook has separate `INPUT_PATH_2D` and `INPUT_PATH_3D` settings.
 The default 3D preset stages 15 overlapping RGB keyframes of the Blue V5 section
 from `wallC_raw_data.zip`. For a new wall section, point `INPUT_PATH_3D` to its own
 photo folder, ZIP, or video. The notebook can show saved masks next to each photo,
-color them by type or group, and display the generated GLB with hold markers.
+color them by type or observed RGB, and display the generated GLB with hold markers.
 The same review ID identifies a hold on the mesh and in its supporting frames.
 
 ## Input and output
 
-2D accepts exactly one photo (including iPhone HEIC) and exports masks, IDs, normalized 2D centers/sizes, color groups
+2D accepts exactly one photo (including iPhone HEIC) and exports masks, IDs, normalized 2D centers/sizes, observed colors
 and optional six-class RGB type proposals. 3D accepts ordinary overlapping photos or a video,
 constructs a local wall through COLMAP, segments registered **undistorted images** and lifts masks
 using their stereo depth maps. Repeated evidence is fused through color consistency and 3D
@@ -37,12 +44,30 @@ normalized left, top, right, and bottom edges on the EXIF-oriented source.
 The 2D coordinates refer to the prepared crop and `wall.input_crop` records its
 pixel bounds in the oriented source.
 
-Both modes return schema 3.0 `scene.json` with identical hold keys; `wall_scene.json` is an
-identical compatibility copy. No route planner is included. Image coordinates have top-left
-origin, x right and y down. COLMAP's world axes are arbitrary. The 3D scene exporter
-estimates `wall.up_vector` from the registered camera poses and records the result in
-`wall.up_orientation`. Upright views with enough variation in camera direction can
-provide a usable estimate. Ambiguous captures return `manual_required`.
+Both modes return one schema 5.0 `RUN/scene.json` with the same hold keys. The
+top-level `units`, `up_axis` and `source_file` describe the frame of `holds[].position`.
+The export follows the Blue V5 field names for the planner while retaining image
+observations and mesh correspondence for review.
+
+| Field | 2D photo | 3D wall |
+| --- | --- | --- |
+| `position` | Normalized `[x, y]` in the prepared photo, with right and down positive | `[x, y, z]` in the exported GLB, or `null` for an unmapped hold |
+| `units` | `normalized_image` | `meters` with scale calibration, otherwise `arbitrary` |
+| `up_axis` | `null` | `y` when orientation is resolved, otherwise `null` |
+| `height_m` | `null` | Height from the scanned wall bottom with orientation and metric scale |
+| `mean_color` | Mean RGB of masked image pixels | Average of per-view RGB means for merged masks |
+| `is_start`, `is_top` | Explicit annotations | Explicit annotations |
+
+The route-grouping consumer clusters holds using `holds[].id` and `holds[].mean_color`. `mean_color` contains RGB channels in the range 0–255 or `null` when unavailable. Each `observations[]` entry provides per-view color evidence, including `mean_color_source` and an optional `color_lab`. Manual route annotations populate `route_ids`.
+
+Color can fall back to the bounding box when a mask is unavailable. The hold's
+`flags` record this fallback. `start_hold_ids` lists the marked starts, and
+`top_hold_id` is populated when exactly one hold is marked as the finish.
+
+The 3D scene exporter estimates `wall.up_vector` from registered camera poses and
+records the result in `wall.up_orientation`. Upright views with enough variation
+in camera direction can provide a usable estimate. Ambiguous captures return
+`manual_required`.
 
 The Colab picker accepts two clicks on a known vertical line in an undistorted
 registered image. The CLI accepts the same reference with `export-wall --up-reference`.
@@ -51,16 +76,19 @@ An example reference file is
 Both points need valid, locally consistent stereo depth. This export uses
 the existing reconstruction and inference files.
 
-Use `height_3d` to order holds from lower to higher. It is a projection onto the up
-vector relative to the reconstruction origin. `height_m` is the same projection
-with metric scale applied. Heights are null when the hold is unmapped or vertical
-could not be resolved.
+`height_from_wall_bottom` is the hold's GLB Y minus `wall_bottom_height`, the
+0.5th percentile of GLB vertex heights. The reference describes the scanned area.
+In a crop of the middle of a wall, zero is near the lower edge of that crop.
+
+`height_m` uses the same reference with metric scale. `height_3d` gives the
+projection relative to the reconstruction origin.
 
 When the up direction is resolved, scene export writes `wall_upright.glb` with
 glTF +Y pointing up. `wall.glb_path` points to this file, and `wall.reconstruction_to_glb`
 records the 4×4 transform from the reconstruction, including any metric scale.
-Use `position_glb` to place hold markers or animation targets in the downloaded
-mesh. The reconstruction coordinates remain available for camera correspondence.
+Use `position` or `position_glb` to place holds in the GLB. The hold-level
+`wall_normal` shares those axes. `wall_normal_reconstruction` gives the same
+vector in the camera reconstruction's coordinate frame.
 
 ```text
 RUN/capture/capture.json
@@ -113,7 +141,7 @@ The YOLO checkpoint is optional while training is pending. Without it, types nee
 For a six-class Roboflow `.pt` trained at 640px, pass `--type-imgsz 640` to
 `analyze-wall` or `segment-capture`. The inference notebook exposes the same size
 as `TYPE_IMGSZ` and can preview the checkpoint on one photo with `RUN_YOLO_PREVIEW`.
-Set `TYPE_MIN_SCORE` in the notebook segmentation cell or pass `--type-min-score`
+Set `TYPE_MIN_SCORE` in the notebook settings or pass `--type-min-score`
 to change the acceptance threshold for overlapping YOLO boxes. Changing this
 threshold reuses completed SAM3 batches. `scene.json` reports unknown observations
 with no overlapping candidate, a score below the cutoff, or an eligible box left
@@ -183,12 +211,18 @@ Both pixels need valid depth. This calibrates length, not gravity or wall orient
 Do not substitute original distorted-image coordinates. aabb_volume_m3 is an approximate
 bounding-box volume, not actual hold volume. Grip area, true volume, edge depth and hold-facing
 normal stay null. Local wall normals and protrusion are reviewable estimates from visible data.
-Occluded lips/openings cannot be recovered as measured facts from an incomplete mesh.
+Occluded lips and openings leave grip fields null. `footprint_m` estimates across-wall
+and up-wall spans by projecting visible hold samples onto the local wall plane.
+`wall_angle_deg` comes from the camera-facing wall normal and up vector. Negative
+angles indicate overhangs and positive angles indicate slabs outside the vertical tolerance.
 
 Human edits are a JSON map keyed by stable hold ID:
 
 ```json
-{"hold_a1b2c3d4e5f6":{"hold_type":"undercling","opening_direction":"down","is_start":true,"route_ids":["blue_v5"]}}
+{
+  "hold_a1b2c3d4e5f6": {"hold_type":"undercling","opening_direction":"down","is_start":true,"route_ids":["blue_v5"]},
+  "hold_112233445566": {"is_top":true,"route_ids":["blue_v5"]}
+}
 ```
 
 Set DEMO_ANNOTATIONS and rerun only export, or pass --annotations-path to holds export-wall.

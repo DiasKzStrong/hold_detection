@@ -6,7 +6,7 @@ from pathlib import Path
 from build_colab_notebook import build_notebook, cell
 
 ROOT = Path(__file__).resolve().parents[1]
-OUTPUT = ROOT / "notebooks/DeMoSearch_Classifier_Training.ipynb"
+OUTPUT = ROOT / "notebooks/experiments/DeMoSearch_Classifier_Training.ipynb"
 
 
 def build_training_notebook():
@@ -93,7 +93,7 @@ def build_training_notebook():
                 if CLASS_NAMES: args += ['--class-names', *CLASS_NAMES.replace(',', ' ').split()]
                 if GROUPS_CSV: args += ['--groups', GROUPS_CSV]
                 run_holds(*args, log_name='prepare_crops')
-            from hold_detection.crop_dataset import load_crops
+            from hold_detection.training.crop_dataset import load_crops
             crop_manifest = load_crops(CROP_DATA)
             print('Prepared crops:', CROP_DATA)
             print('Reuse this exact CROP_DATA path when resuming training.')

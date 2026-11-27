@@ -5,8 +5,9 @@ documentation, notebook Markdown, cell titles, prompts, error messages, UI label
 and report text. New and edited project content must follow this convention.
 Do not translate user-provided datasets, annotations, filenames, or model labels.
 
-Edit `scripts/build_colab_notebook.py` to change the notebook, then regenerate
-`notebooks/DeMoSearch_SAM3_Colab.ipynb` with:
+Edit `notebooks/DeMoSearch_Pipeline.ipynb` directly for the main inference notebook.
+Edit `scripts/build_colab_notebook.py` for the comparison notebook and regenerate
+`notebooks/experiments/DeMoSearch_SAM3_Colab.ipynb` with:
 
 ```bash
 python scripts/build_colab_notebook.py
@@ -14,8 +15,7 @@ python scripts/build_colab_notebook.py
 
 Run `uv run --extra dev pytest` before committing changes.
 
-Classifier training code lives in `crop_dataset.py`, `learned_classifier.py` and
-`classifier_training.py` under `src/hold_detection`. Run optional encoder tests
+Classifier training code lives under `src/hold_detection/training/`. Run optional encoder tests
 with `uv run --extra dev --extra training pytest`. Regenerate the training
 notebook with `python scripts/build_training_notebook.py`.
 

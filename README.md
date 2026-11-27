@@ -1,53 +1,21 @@
 # DeMoSearch climbing wall perception
 
-The complete pipeline now has ordinary Python functions and CLI commands for **2D single-photo**
-and **3D photos/video** input. It combines SAM3 masks, optional trained YOLO26 grip types,
-COLMAP reconstruction and multiview mapping into the same `scene.json` schema.
-See [wall pipeline and SLURM commands](docs/wall-pipeline.md).
-[Open the complete inference notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Pipeline.ipynb).
-It tests 2D/3D analysis with existing checkpoints and contains no model-training steps.
+DeMoSearch analyzes a selected section of a climbing wall. **2D** takes one photo,
+with optional crop. **3D** takes overlapping photos or video and reconstructs the
+section with COLMAP. Both modes use SAM 3 for hold masks, optional YOLO26 for hold
+types, and measured hold colors. Both export `scene.json` for the downstream graph algorithm.
+3D also exports a GLB with hold coordinates and correspondence evidence.
 
-The reference comparison described below remains available as a legacy baseline.
+[Open the inference notebook in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Pipeline.ipynb).
+Select a GPU runtime, set `MODE` and the input paths, and provide ready checkpoints.
+See [the module map, CLI, and SLURM instructions](docs/wall-pipeline.md).
 
-A research pipeline for finding climbing holds and volumes, proposing routes
-from mask colors, and preparing observations for multi-view 3D association. It
-uses the trained YOLO11s checkpoint from
-[Marcuss2106's project](https://github.com/Marcuss2106/indoor-climbing-gym-hold-classification),
-with an optional separate crop CNN from the same project and an optional
-SAM 2.1 adapter for box-prompted instance masks.
+## Comparison experiment
 
-**SAM 3:** an independent text-prompted detection + mask backend is now available.
-See [SAM 3 setup and viewing instructions](docs/sam3.md). Its official code was
-installed, but this cloud machine lacks CUDA and Hugging Face weights are blocked
-by its proxy; actual SAM 3 predictions are not yet verified.
-
-This is an inference baseline, not a validated route or reconstruction system.
-See [checkpoint provenance and limitations](docs/model-provenance.md).
-
-## Google Colab
-
-[Open the notebook in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_SAM3_Colab.ipynb).
-
-The notebook compares **YOLO11s detection** with **SAM 3 instance masks** on the
-same photos. It exports mask-color route candidates, a draft `scene.json`, route
-review images, diagnostics, and an offline report download.
-Start with its default of three photos. YOLO runs first, even without GPU/HF access.
-
-Select a GPU runtime for SAM; the notebook creates its own Python 3.12 model
-environment, including when Colab's kernel uses Python 3.13. It does not import or
-modify the kernel's PyTorch. The first setup downloads pinned CPU/CUDA wheels and
-can take several minutes. SAM's official source revision is pinned;
-approved access to `facebook/sam3` and `HF_TOKEN` in Colab Secrets (or a hidden
-prompt) are required. The notebook checks out this public repository and records
-the exact commit. Photos, Polycam raw-data ZIPs and Drive inputs are supported.
-
-Upload COCO ground truth to obtain precision/recall/F1, box AP, SAM mask AP/IoU
-and type confusion matrices. Without labels it reports diagnostics, **not accuracy**.
-See [notebook controls and evaluation protocol](docs/colab.md).
-Actual SAM GPU inference has not been validated on this CPU-only development machine.
-
-Regenerate the notebook after notebook edits with
-`python scripts/build_colab_notebook.py`; it never embeds photos, weights or tokens.
+The [YOLO11s and SAM 3 notebook](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/experiments/DeMoSearch_SAM3_Colab.ipynb)
+compares models on the same photos, with optional COCO metrics and an offline report.
+See the [experiment controls](docs/colab.md), [SAM 3 setup](docs/sam3.md), and
+[checkpoint provenance](docs/model-provenance.md).
 
 ## YOLO26m training
 
@@ -64,7 +32,7 @@ validation-selected checkpoints, restart and test reports. Artifacts plug into
 SAM 3 using `--classifier trained --classifier-weights /path/to/best.pt`.
 
 - [Training guide](docs/classifier-training.md)
-- [Training notebook in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_Classifier_Training.ipynb)
+- [Training notebook in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/experiments/DeMoSearch_Classifier_Training.ipynb)
 - [NYU Cloud Bursting jobs: two A100s](docs/nyu-hpc.md), account `csci_ga_2271-2026fa`,
   partition `c24m170-a100-2`; data preparation and linear-head training use CPU jobs.
 
@@ -93,7 +61,7 @@ For GPU development, install the appropriate official PyTorch/torchvision
 2.7.1/0.22.1 wheels into `.venv` using `uv pip`; use `.venv/bin/holds` directly
 afterward, because another `uv sync` restores the locked CPU environment.
 
-## Find holds and propose color routes
+## Legacy prediction and Polycam commands
 
 ```bash
 uv run holds predict path/to/wall.jpg --output runs/wall-001
@@ -106,7 +74,7 @@ groups, and crops. Copy the whole run folder to view it locally. Every run gets
 `scene.json`; each frame gets `annotated.jpg`, `routes.jpg`, `holds.json`, and
 individual `crops/`. Segmentation runs additionally export lossless masks.
 `summary.json` records settings, checkpoint hashes, timings and per-frame counts.
-`scene.json` is the future planner interface. Its `physical_holds` list remains
+The legacy scene uses the draft schema. Its `physical_holds` list remains
 empty for ordinary photos. For a prepared Polycam capture and instance masks, it
 contains multi-view RGB-D hold candidates with metric position, size, and
 protrusion in the capture coordinate frame. With a complete wall bundle, a
@@ -176,13 +144,10 @@ uv run holds predict data/wallA_1/keyframes/corrected_images \
   --output runs/wallA_1 --device cpu --rotate 90
 ```
 
-The importer preserves original and corrected RGB/camera pairs, depth maps,
-confidence maps and mesh metadata. It rejects unsafe ZIP paths and existing
-output directories. Point inference at `corrected_images`, not the export root
-or a directory containing depth images. Processing exported data makes no
-requests to Polycam. There is no reconstruction, RGB-D fusion, multi-view hold
-identity or metric-depth claim yet. Color-derived `route_candidate_id` values
-belong to frame observations; `physical_holds` remains empty.
+The importer preserves RGB/camera pairs, depth, confidence maps, and mesh metadata.
+Point inference at `keyframes/corrected_images`. For RGB-D fusion, use SAM 3 masks
+with the prepared capture. The COLMAP workflow accepts overlapping RGB images
+or a video through `analyze-wall --mode 3d`.
 
 ## Optional SAM 2.1 masks
 

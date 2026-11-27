@@ -7,14 +7,10 @@ from pathlib import Path
 import numpy as np
 from PIL import Image
 
+from ..capture.images import processed_image
+from ..perception.geometry import TYPES
+from ..perception.inference import COLORS
 from .benchmark import _read_mask, load_run, validate_shared_frames
-from .geometry import TYPES
-from .pipeline import COLORS
-
-
-def processed_image(frame):
-    with Image.open(frame["source_image"]) as original:
-        return original.convert("RGB").rotate(-frame["rotation_clockwise_degrees"], expand=True)
 
 
 def plot_comparison(runs, frame_id=None, thresholds=None, boxes=True, masks=True, labels=False,

@@ -9,53 +9,27 @@ import numpy as np
 from PIL import Image
 from scipy.spatial import cKDTree
 
-from .reconstruction import colmap_depth_path, lift_mask, read_colmap_cameras, read_colmap_depth
-from .wall_orientation import estimate_up, glb_frame_transform, manual_up
+from ..capture.images import processed_image
+from ..perception.geometry import crop_box
+from ..perception.hold_types import summarize_type_assignments
+from ..reconstruction.colmap import colmap_depth_path, lift_mask, read_colmap_cameras, read_colmap_depth
+from ..reconstruction.orientation import estimate_up, glb_frame_transform, manual_up
 
 
-def assign_type_proposals(holds, proposals, minimum_score=0.5, minimum_iou=0.3):
-    """Match detector boxes one-to-one; retain segmentation instances without a type match."""
-    from .geometry import box_iou
-    from scipy.optimize import linear_sum_assignment
-    result = [dict(hold, hold_type="unknown", hold_type_confidence=None,
-                   hold_type_source="not_inferred", type_needs_review=True,
-                   type_match_iou=None, type_proposals=[],
-                   needs_review=True,
-                   review_reasons=sorted(set(hold.get("review_reasons", [])) | {"rgb_type_requires_review"}))
-              for hold in holds]
-    if not holds or not proposals:
-        return result
-    overlap = np.array([[box_iou(h["bbox_xyxy"], p["bbox_xyxy"]) for p in proposals] for h in holds])
-    for row, hold in enumerate(result):
-        hold["type_proposals"] = [{"label": proposal["label"], "score": proposal["score"],
-                                   "iou": float(overlap[row, column])}
-                                  for column, proposal in enumerate(proposals) if overlap[row, column] >= minimum_iou]
-    # Gate both score and overlap before the global assignment.
-    eligible = (overlap >= minimum_iou) & np.array([p["score"] >= minimum_score for p in proposals])
-    valid = np.where(eligible, overlap, 0)
-    for row, column in zip(*linear_sum_assignment(-valid)):
-        proposal = proposals[column]
-        if not eligible[row, column]:
-            continue
-        result[row].update(hold_type=proposal["label"], hold_type_confidence=proposal["score"],
-                           hold_type_source="yolo26_rgb_joint_score", type_needs_review=True,
-                           type_match_iou=float(overlap[row, column]))
-    return result
+BOTTOM_PERCENTILE = 0.5
+VERTICAL_TOLERANCE_DEG = 2.0
 
 
-def _type_assignment_review(observations, minimum_score):
-    counts = {"no_overlapping_yolo_candidate": 0, "below_type_min_score": 0, "eligible_but_unmatched": 0}
-    for observation in observations:
-        if observation["hold_type"] != "unknown":
-            continue
-        proposals = observation["type_proposals"]
-        if not proposals:
-            counts["no_overlapping_yolo_candidate"] += 1
-        elif max(proposal["score"] for proposal in proposals) < minimum_score:
-            counts["below_type_min_score"] += 1
-        else:
-            counts["eligible_but_unmatched"] += 1
-    return {"minimum_score": minimum_score, "unknown_observations_by_reason": counts}
+def _mean_color(image, mask, bbox):
+    if image is None:
+        return None, None
+    if mask is not None and mask.shape == image.shape[:2] and mask.any():
+        return image[mask].mean(axis=0).tolist(), "mask"
+    x1, y1, x2, y2 = crop_box(bbox, image.shape[1], image.shape[0], padding=0)
+    if x2 <= x1 or y2 <= y1:
+        return None, None
+    pixels = image[y1:y2, x1:x2].reshape(-1, 3)
+    return pixels.mean(axis=0).tolist(), "bbox"
 
 
 def _observation(frame, hold):
@@ -67,7 +41,7 @@ def _observation(frame, hold):
             "position_2d_normalized": [(x1 + x2) / (2 * width), (y1 + y2) / (2 * height)],
             "size_2d_normalized": [(x2 - x1) / width, (y2 - y1) / height],
             "color_rgb": hold.get("median_rgb"), "color_lab": hold.get("color_lab"),
-            "color_group_id": hold.get("route_candidate_id"),
+            "mean_color": hold.get("mean_color"), "mean_color_source": hold.get("mean_color_source"),
             "mask_path": f"{frame['frame_id']}/{hold['mask_path']}" if hold.get("mask_path") else None,
             "hold_type": hold.get("hold_type", "unknown"),
             "hold_type_confidence": hold.get("hold_type_confidence"),
@@ -111,8 +85,9 @@ def fuse_holds(observations, scale_m_per_unit=None):
     return groups
 
 
-def build_wall_scene(observations, mode, reconstruction=None, annotations=None, orientation=None):
-    """Keep identical keys in 2D and 3D; unavailable geometry is null, never fabricated."""
+def build_wall_scene(observations, mode, reconstruction=None, annotations=None, orientation=None,
+                     *, reconstruction_to_glb=None, wall_bottom_height=None):
+    """Build the shared hold contract from saved image and reconstruction evidence."""
     if mode not in {"2d", "3d"}:
         raise ValueError("Mode must be 2d or 3d")
     reconstruction = reconstruction or {}
@@ -121,6 +96,9 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None, 
     scale = reconstruction.get("scale_m_per_unit") if mode == "3d" else None
     if scale is not None and (not np.isfinite(scale) or scale <= 0):
         raise ValueError("Scale must be finite and positive")
+    units = "normalized_image" if mode == "2d" else "meters" if scale is not None else "arbitrary"
+    up_axis = "y" if up is not None and reconstruction_to_glb is not None else None
+    height_reference = "mesh_bottom_percentile" if wall_bottom_height is not None else None
     groups = fuse_holds(observations, scale) if mode == "3d" else [[item] for item in observations]
     holds = []
     for group in groups:
@@ -133,35 +111,81 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None, 
         normals = [item["wall_normal"] for item in valid if item["wall_normal"] is not None]
         normal = np.mean(normals, axis=0) if normals else None
         if normal is not None:
-            normal /= max(1e-12, np.linalg.norm(normal))
+            norm = np.linalg.norm(normal)
+            normal = normal / norm if norm > 1e-12 else None
+        position_glb = wall_normal = None
+        if position is not None and reconstruction_to_glb is not None:
+            linear = reconstruction_to_glb[:3, :3]
+            position_glb = (linear @ position + reconstruction_to_glb[:3, 3]).tolist()
+            if normal is not None:
+                transformed = linear @ normal
+                wall_normal = (transformed / np.linalg.norm(transformed)).tolist()
+        relative_height = (position_glb[1] - wall_bottom_height
+                           if position_glb is not None and wall_bottom_height is not None else None)
+        wall_angle = wall_kind = footprint = None
+        if normal is not None and up is not None:
+            wall_angle = float(np.degrees(np.arcsin(np.clip(normal @ up, -1, 1))))
+            if abs(wall_angle) <= VERTICAL_TOLERANCE_DEG:
+                wall_kind = "vertical"
+            else:
+                wall_kind = "overhang" if wall_angle < 0 else "slab"
+            across = np.cross(up, normal)
+            across_length = np.linalg.norm(across)
+            if scale is not None and across_length > 1e-8:
+                across /= across_length
+                along = np.cross(normal, across)
+                footprint = (np.ptp(points @ np.column_stack((across, along)), axis=0) * scale).tolist()
         protrusions = [item["protrusion"] for item in valid if item["protrusion"] is not None]
         typed = [item for item in group if item["hold_type"] != "unknown"]
         types = {item["hold_type"] for item in typed}
         best = max(typed, key=lambda item: item["hold_type_confidence"] or 0) if len(types) == 1 else None
         first = group[0]
+        mask_colors = [item["mean_color"] for item in group if item.get("mean_color_source") == "mask"]
+        box_colors = [item["mean_color"] for item in group if item.get("mean_color_source") == "bbox"]
+        colors = mask_colors or box_colors
+        flags = []
+        if mode == "3d":
+            flags.append("grip_surface_metrics_unavailable")
+            if position is None:
+                flags.append("unmapped_3d")
+            if scale is None:
+                flags.append("metric_scale_unavailable")
+            if up is None:
+                flags.append("up_direction_unavailable")
+        if box_colors and not mask_colors:
+            flags.append("bbox_color_fallback")
         hold = {
-            "id": identity, "object_kind": first["object_kind"],
+            "id": identity,
+            "position": first["position_2d_normalized"] if mode == "2d" else position_glb,
+            "height_m": relative_height if scale is not None else None,
+            "facing": None, "wall_normal": wall_normal,
+            "wall_angle_deg": wall_angle, "wall_kind": wall_kind,
+            "protrusion_m": float(np.median(protrusions) * scale) if protrusions and scale else None,
+            "footprint_m": footprint, "grip_area_m2": None, "slope_deg": None,
+            "incut_angle_deg": None, "edge_depth_m": None, "two_hands": None,
+            "mean_color": np.mean(colors, axis=0).round().astype(int).tolist() if colors else None,
+            "is_start": False, "is_top": False, "flags": flags,
+            "n_faces": None, "surface_area_m2": None, "wall_like_area_frac": None, "plane_inliers": None,
+            "object_kind": first["object_kind"],
             "observation_ids": [item["id"] for item in group], "observation_count": len(group),
             "position_2d_normalized": first["position_2d_normalized"],
             "size_2d_normalized": first["size_2d_normalized"], "reference_frame_id": first["frame_id"],
             "position_3d": position.tolist() if valid else None,
             "position_3d_m": (position * scale).tolist() if valid and scale else None,
-            "position_glb": None,
-            "height_3d": height,
-            "height_m": height * scale if height is not None and scale is not None else None,
+            "position_glb": position_glb,
+            "height_3d": height, "height_from_wall_bottom": relative_height,
             "size_3d_m": (size * scale).tolist() if valid and scale else None,
-            "protrusion_m": float(np.median(protrusions) * scale) if protrusions and scale else None,
             "aabb_volume_m3": float(np.prod(size * scale)) if valid and scale else None,
             "volume_m3": None, "surface_normal": None,
-            "wall_normal": normal.tolist() if normal is not None else None,
+            "wall_normal_reconstruction": normal.tolist() if normal is not None else None,
             "hold_type": best["hold_type"] if best else "unknown",
             "hold_type_confidence": best["hold_type_confidence"] if best else None,
             "hold_type_source": best["hold_type_source"] if best else "not_inferred_or_conflicting",
             "type_candidates": [dict(proposal, observation_id=item["id"])
                                 for item in group for proposal in item.get("type_proposals", [])],
-            "opening_direction": "unknown", "grip_area_m2": None, "edge_depth_m": None,
-            "color_rgb": first["color_rgb"], "color_group_id": first["color_group_id"],
-            "route_ids": [], "is_start": False, "is_finish": False,
+            "opening_direction": "unknown",
+            "color_rgb": first["color_rgb"],
+            "route_ids": [], "is_finish": False,
             "geometry_reliable": False,
             "geometry_status": "multi_view" if len(group) > 1 and valid else "single_view" if valid else "unmapped",
             "needs_review": True, "mesh_correspondence": None, "ground_truth_match": None,
@@ -171,27 +195,42 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None, 
         for key in ["hold_type", "opening_direction", "route_ids", "is_start", "is_finish"]:
             if key in edits:
                 hold[key] = edits[key]
+        if "is_top" in edits and "is_finish" in edits and edits["is_top"] != edits["is_finish"]:
+            raise ValueError(f"Conflicting is_top and is_finish annotations for {identity}")
+        hold["is_top"] = hold["is_finish"] = edits.get("is_top", hold["is_finish"])
         if "hold_type" in edits:
             hold["hold_type_source"], hold["hold_type_confidence"] = "human", None
         holds.append(hold)
-    return {"schema_version": "3.0", "analysis_mode": mode,
+    top_holds = [hold["id"] for hold in holds if hold["is_top"]]
+    return {"schema_version": "5.0", "units": units, "up_axis": up_axis,
+            "source_file": None, "wall_object": None,
+            "wall_bottom_height": wall_bottom_height, "wall_bottom_raw_min": None,
+            "height_reference": height_reference,
+            "params": {"bottom_percentile": BOTTOM_PERCENTILE, "vertical_tol": VERTICAL_TOLERANCE_DEG},
+            "holds": holds, "start_hold_ids": [hold["id"] for hold in holds if hold["is_start"]],
+            "top_hold_id": top_holds[0] if len(top_holds) == 1 else None,
+            "analysis_mode": mode,
             "wall": {"coordinate_frame": "colmap_world" if mode == "3d" else "processed_image",
-                     "units": reconstruction.get("units", "arbitrary" if mode == "3d" else "normalized_image"),
+                     "units": units,
                      "scale_m_per_unit": scale, "up_axis": None,
                      "up_vector": up, "up_orientation": orientation,
                      "height_reference": "reconstruction_origin" if up is not None else None,
-                     "glb_path": reconstruction.get("glb_path"), "glb_up_axis": None,
-                     "reconstruction_to_glb": None, "reconstruction": reconstruction},
-            "holds": holds, "observations": observations,
+                     "glb_path": reconstruction.get("glb_path"), "glb_up_axis": up_axis,
+                     "reconstruction_to_glb": (reconstruction_to_glb.tolist()
+                                               if reconstruction_to_glb is not None else None),
+                     "reconstruction": reconstruction},
+            "observations": observations,
             "review": {"unknown_type_count": sum(h["hold_type"] == "unknown" for h in holds),
                        "unmapped_hold_count": sum(h["position_3d"] is None for h in holds) if mode == "3d" else 0},
-            "limitations": ["color_groups_are_not_unique_routes", "joint_type_scores_are_not_calibrated_probabilities",
+            "limitations": ["joint_type_scores_are_not_calibrated_probabilities",
                             "occluded_grip_metrics_unavailable", "aabb_volume_is_not_true_hold_volume"]}
 
 
 def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None, up_reference_path=None):
     """Lift saved masks, retain all observations and write the graph algorithm's scene.json."""
     run = Path(run).resolve()
+    if mode == "2d" and reconstruction_path:
+        raise ValueError("Choose 3D mode to export a reconstruction")
     reconstruction = json.loads(Path(reconstruction_path).read_text()) if reconstruction_path else {}
     if mode == "3d" and not reconstruction:
         raise ValueError("3D export requires reconstruction.json")
@@ -208,20 +247,27 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
     if not frame_paths or summary["frame_count"] != len(frame_paths):
         raise ValueError("Inference frames are incomplete; resume segmentation before export")
     observations = []
+    source_file = None
     for frame_path in frame_paths:
         frame = json.loads(frame_path.read_text())
-        camera = cameras.get(Path(frame["source_image"]).name)
+        source = Path(frame["source_image"])
+        if mode == "2d":
+            source_file = source.name
+        pixels = np.asarray(processed_image(frame)) if frame["holds"] and source.is_file() else None
+        camera = cameras.get(source.name)
         depth = None
         if camera:
-            name = Path(frame["source_image"]).name
-            depth_file = colmap_depth_path(reconstruction["depth_directory"], name)
+            depth_file = colmap_depth_path(reconstruction["depth_directory"], source.name)
             if depth_file.exists():
                 depth = read_colmap_depth(depth_file)
         for hold in frame["holds"]:
             hold = dict(hold)
-            if depth is not None and hold.get("mask_path"):
+            mask = None
+            if hold.get("mask_path") and (pixels is not None or depth is not None):
                 with Image.open(frame_path.parent / hold["mask_path"]) as stored:
                     mask = np.asarray(stored.convert("L")) > 0
+            hold["mean_color"], hold["mean_color_source"] = _mean_color(pixels, mask, hold["bbox_xyxy"])
+            if depth is not None and mask is not None:
                 if frame.get("rotation_clockwise_degrees", 0):
                     raise ValueError("COLMAP masks must use unrotated undistorted images")
                 hold["geometry"] = lift_mask(depth, mask, camera)
@@ -229,35 +275,47 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
                     hold["geometry"]["depth_map_type"] = depth_file.name.rsplit(".", 2)[1]
             observations.append(_observation(frame, hold))
     annotations = json.loads(Path(annotations_path).read_text()) if annotations_path else None
-    scene = build_wall_scene(observations, mode, reconstruction, annotations, orientation)
-    scene["wall"]["input_crop"] = summary.get("input_crop")
-    if summary.get("grip_type_inference_enabled"):
-        minimum_score = summary.get("settings", {}).get("type_min_score", 0.5)
-        scene["review"]["type_assignment"] = _type_assignment_review(observations, minimum_score)
+    transform = upright = mesh = None
+    wall_bottom = wall_bottom_raw_min = None
+    scale = reconstruction.get("scale_m_per_unit")
+    glb_path = reconstruction.get("glb_path")
     if reconstruction:
         import trimesh
+
         mesh = trimesh.load(reconstruction["mesh_path"], force="mesh", process=False)
+        up = orientation["up_vector"] if orientation is not None else None
+        transform = glb_frame_transform(up, cameras, scale)
+        if up is not None:
+            upright = run / "wall_upright.glb"
+            glb_path = str(upright)
+            heights = mesh.vertices @ transform[1, :3] + transform[1, 3]
+            wall_bottom = float(np.percentile(heights, BOTTOM_PERCENTILE))
+            wall_bottom_raw_min = float(heights.min())
+        source_file = Path(glb_path).name if glb_path else None
+
+    scene = build_wall_scene(observations, mode, reconstruction, annotations, orientation,
+                             reconstruction_to_glb=transform if glb_path else None,
+                             wall_bottom_height=wall_bottom)
+    scene.update(source_file=source_file, wall_bottom_raw_min=wall_bottom_raw_min)
+    scene["wall"]["input_crop"] = summary.get("input_crop")
+    scene["wall"]["glb_path"] = glb_path
+    if summary.get("grip_type_inference_enabled"):
+        minimum_score = summary.get("settings", {}).get("type_min_score", 0.5)
+        scene["review"]["type_assignment"] = summarize_type_assignments(observations, minimum_score)
+    if mesh is not None:
+        if glb_path:
+            # trimesh uses the PLY node name when exporting a single mesh to GLB.
+            scene["wall_object"] = next(iter(mesh.scene().graph.nodes_geometry), None)
         tree = cKDTree(np.asarray(mesh.vertices))
-        scale = reconstruction.get("scale_m_per_unit")
-        wall = scene["wall"]
-        transform = glb_frame_transform(wall["up_vector"], cameras, scale)
-        upright = run / "wall_upright.glb" if wall["up_vector"] is not None else None
-        if upright is not None:
-            wall.update(glb_path=str(upright), glb_up_axis="y")
-        if wall["glb_path"]:
-            wall["reconstruction_to_glb"] = transform.tolist()
-        linear = transform[:3, :3]
         for hold in scene["holds"]:
             if hold["position_3d"] is None:
                 continue
             distance, index = tree.query(hold["position_3d"])
             anchor = mesh.vertices[index]
-            if wall["glb_path"]:
-                hold["position_glb"] = (linear @ hold["position_3d"]).tolist()
             hold["mesh_correspondence"] = {
                 "method": "nearest_mesh_vertex", "mesh_path": reconstruction["mesh_path"],
                 "vertex_index": int(index), "position_3d": anchor.tolist(),
-                "position_glb": (linear @ anchor).tolist() if wall["glb_path"] else None,
+                "position_glb": (transform[:3, :3] @ anchor + transform[:3, 3]).tolist() if glb_path else None,
                 "distance_reconstruction_units": float(distance),
                 "distance_m": float(distance * scale) if scale else None,
                 "is_semantic_hold_object_match": False, "needs_review": True,
@@ -272,6 +330,4 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
         if observation["mask_path"]:
             observation["mask_path"] = "inference/" + observation["mask_path"]
     (run / "scene.json").write_text(json.dumps(scene, indent=2, allow_nan=False) + "\n")
-    # Keep the previous notebook filename as a byte-identical compatibility artifact.
-    (run / "wall_scene.json").write_text((run / "scene.json").read_text())
     return scene

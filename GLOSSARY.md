@@ -21,7 +21,7 @@ A set of Physical Holds intended to be climbed together.
 _Avoid_: Color, grip type
 
 **Color Group**:
-A set of Physical Holds on one wall that share the same observed route color.
+A set of Physical Holds on one wall grouped by their observed color.
 _Avoid_: Route, color name
 
 ## Capture And Reconstruction

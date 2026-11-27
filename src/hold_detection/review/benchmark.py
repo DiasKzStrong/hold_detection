@@ -12,7 +12,7 @@ from pathlib import Path, PurePosixPath
 import numpy as np
 from PIL import Image
 
-from .geometry import TYPES, box_iou, canonical_type
+from ..perception.geometry import TYPES, box_iou, canonical_type
 
 
 def load_run(path: Path) -> dict:

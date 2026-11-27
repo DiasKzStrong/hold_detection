@@ -1,6 +1,6 @@
 # YOLO vs SAM 3 · Colab experiment
 
-[Open in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/DeMoSearch_SAM3_Colab.ipynb).
+[Open in Colab](https://colab.research.google.com/github/DiasKzStrong/hold_detection/blob/main/notebooks/experiments/DeMoSearch_SAM3_Colab.ipynb).
 Select a GPU runtime and execute sections 1–8 in order. A Python 3.13 notebook
 kernel is supported: model inference runs in a separate Python 3.12 process. The default
 is three frames, not the whole scan. YOLO also works on CPU without HF access.

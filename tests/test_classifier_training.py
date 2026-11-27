@@ -6,11 +6,11 @@ from PIL import Image
 import pytest
 import torch
 
-from hold_detection import classifier_training as training
+from hold_detection.training import classifier_training as training
 from hold_detection.cli import main, parser
-from hold_detection.crop_dataset import load_crops, prepare_crops
-from hold_detection.geometry import TYPES, Detection
-from hold_detection.learned_classifier import LearnedCropClassifier
+from hold_detection.training.crop_dataset import load_crops, prepare_crops
+from hold_detection.perception.geometry import TYPES, Detection
+from hold_detection.training.learned_classifier import LearnedCropClassifier
 
 
 def labeled_export(root):
