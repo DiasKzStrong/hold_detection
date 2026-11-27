@@ -21,7 +21,8 @@ python -m uvicorn hold_detection.api:create_app --factory --host 0.0.0.0 --port 
 
 For optional grip-type inference, set `DEMO_TYPE_WEIGHTS` to the YOLO checkpoint
 and `DEMO_TYPE_IMGSZ` to its input size. The default is 640. A single GPU is
-selected with `DEMO_GPU_DEVICE`, which defaults to `0`. Run one Uvicorn process
+selected for SAM 3, YOLO and COLMAP with `DEMO_GPU_DEVICE`, which defaults to
+`0`. The index is relative to the server process’s visible CUDA devices. Run one Uvicorn process
 per results directory. Archive results before clearing that directory between demos.
 
 On your local network, use `http://<computer-lan-ip>:8000` from the phone. For

@@ -94,17 +94,18 @@ def test_photo_crop_uses_oriented_source_pixels_before_resizing(tmp_path):
         prepare_capture(source, tmp_path / "3d", mode="3d", crop_xyxy=bounds)
 
 
-def test_video_capture_extracts_multiple_views_without_a_glb(tmp_path):
+@pytest.mark.parametrize("frame_count,expected_frames", [(20, 5), (10, 3)])
+def test_video_capture_extracts_multiple_views_without_a_glb(tmp_path, frame_count, expected_frames):
     import cv2
     video = tmp_path / "wall.avi"
     writer = cv2.VideoWriter(str(video), cv2.VideoWriter_fourcc(*"MJPG"), 5, (32, 24))
-    for index in range(20):
+    for index in range(frame_count):
         writer.write(np.full((24, 32, 3), index * 10, dtype=np.uint8))
     writer.release()
     result = prepare_capture(video, tmp_path / "capture", mode="3d", max_frames=5)
     assert result["input_kind"] == "video"
-    assert len(result["frames"]) == 5
-    assert result["frames"][-1]["timestamp_seconds"] == 3.8
+    assert len(result["frames"]) == expected_frames
+    assert result["frames"][-1]["timestamp_seconds"] == (frame_count - 1) / 5
 
 
 def test_colmap_depth_format_and_world_projection_have_known_coordinates(tmp_path):
@@ -302,12 +303,21 @@ def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(t
         raise AssertionError("A completed inference frame must not run again")
 
     monkeypatch.setattr(subprocess, "run", unexpected_process)
+    frame_path = next((run / "inference").glob("*/holds.json"))
+    frame = json.loads(frame_path.read_text())
+    frame["holds"][0]["route_candidate_id"] = "stale_group"
+    frame_path.write_text(json.dumps(frame))
+    old_overlay = frame_path.parent / "routes.jpg"
+    old_overlay.touch()
     segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=640,
                     type_min_score=0.35)
     retuned = export_wall_scene(run, "2d")
     assert retuned["holds"][0]["id"] == initial["holds"][0]["id"]
     assert retuned["holds"][0]["hold_type"] == "jug"
     assert retuned["review"]["type_assignment"]["minimum_score"] == 0.35
+    frame = json.loads(frame_path.read_text())
+    assert "route_candidate_id" not in frame["holds"][0]
+    assert not old_overlay.exists()
     segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=640)
     assert export_wall_scene(run, "2d") == initial
     assert "color_group_id" not in initial["holds"][0]
@@ -317,6 +327,13 @@ def test_segmentation_reuses_completed_frame_processes_and_exports_final_scene(t
     assert (run / "scene.json").is_file()
     assert not (run / "inference/scene.json").exists()
     assert not (run / "wall_scene.json").exists()
+    frame = json.loads(frame_path.read_text())
+    frame["holds"][0]["mask_path"] = "masks/missing.png"
+    frame_path.write_text(json.dumps(frame))
+    recovered = export_wall_scene(run, "2d")
+    assert recovered["holds"][0]["mean_color"] == [0, 0, 254]
+    assert "bbox_color_fallback" in recovered["holds"][0]["flags"]
+    assert recovered["observations"][0]["mask_path"] is None
     with pytest.raises(ValueError, match="settings changed"):
         segment_capture(capture, run, sam_weights=weights, type_weights=type_weights, type_imgsz=1024)
 

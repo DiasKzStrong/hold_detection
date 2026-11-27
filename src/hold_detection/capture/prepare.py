@@ -29,6 +29,8 @@ def prepare_capture(source, output, mode="2d", max_frames=48, video_stride_secon
     source, output = Path(source).resolve(), Path(output).resolve()
     if mode not in {"2d", "3d"} or max_frames < 2 or video_stride_seconds <= 0 or max_image_edge < 64:
         raise ValueError("Choose mode 2d/3d, max_frames >= 2 and a positive video stride.")
+    if mode == "3d" and max_frames < 3:
+        raise ValueError("3D reconstruction requires max_frames >= 3.")
     if crop_xyxy is not None:
         crop_xyxy = list(map(float, crop_xyxy))
         if len(crop_xyxy) != 4:
@@ -88,7 +90,8 @@ def prepare_capture(source, output, mode="2d", max_frames=48, video_stride_secon
             if not video.isOpened() or fps <= 0 or count <= 0:
                 raise ValueError("Cannot read the video frame rate/count.")
             import numpy as np
-            indices = np.unique(np.linspace(0, max(0, count - 1), min(max_frames, max(2, int(count / fps / video_stride_seconds))), dtype=int))
+            sample_count = min(int(count), max_frames, max(3, int(count / fps / video_stride_seconds)))
+            indices = np.linspace(0, int(count) - 1, sample_count, dtype=int)
             for index in indices:
                 video.set(cv2.CAP_PROP_POS_FRAMES, int(index))
                 ok, frame = video.read()

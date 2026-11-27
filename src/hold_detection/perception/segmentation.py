@@ -9,9 +9,9 @@ import sys
 import time
 
 from ..capture.images import collect_images
-from ..review.gallery import build_gallery, write_color_overlay
+from ..review.gallery import build_gallery
 from .assets import sha256
-from .color import assign_color_groups
+from .color import measure_frame_colors
 from .hold_types import TYPE_PROPOSAL_FLOOR, classify_frames
 
 
@@ -97,13 +97,15 @@ def segment_capture(capture, run, reconstruction_path=None, sam_weights=None, ty
     summary_path.unlink(missing_ok=True)
     frame_paths = sorted(inference.glob("*/holds.json"))
     frames = [json.loads(path.read_text()) for path in frame_paths]
-    assign_color_groups(frames)
+    measure_frame_colors(frames)
     if type_weights:
         classify_frames(frames, Path(type_weights), device, type_imgsz, type_min_score)
         summaries["settings"]["type_min_score"] = type_min_score
     for path, frame in zip(frame_paths, frames, strict=True):
+        for hold in frame["holds"]:
+            hold.pop("route_candidate_id", None)
         path.write_text(json.dumps(frame, indent=2, allow_nan=False) + "\n")
-        write_color_overlay(path, frame)
+        (path.parent / "routes.jpg").unlink(missing_ok=True)
     summary_path.write_text(json.dumps(summaries, indent=2) + "\n")
     build_gallery(inference, include_scene=False)
     completion.touch()

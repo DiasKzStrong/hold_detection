@@ -8,12 +8,14 @@ from tempfile import TemporaryDirectory
 import numpy as np
 from PIL import Image
 from scipy.spatial import cKDTree
+from trimesh.transformations import transform_points
 
 from ..capture.images import processed_image
 from ..perception.geometry import crop_box
 from ..perception.hold_types import summarize_type_assignments
 from ..reconstruction.colmap import colmap_depth_path, lift_mask, read_colmap_cameras, read_colmap_depth
 from ..reconstruction.orientation import estimate_up, glb_frame_transform, manual_up
+from .artifacts import SCENE_FILENAME, SCENE_SCHEMA_VERSION, frame_record_paths
 
 
 BOTTOM_PERCENTILE = 0.5
@@ -116,7 +118,7 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None, 
         position_glb = wall_normal = None
         if position is not None and reconstruction_to_glb is not None:
             linear = reconstruction_to_glb[:3, :3]
-            position_glb = (linear @ position + reconstruction_to_glb[:3, 3]).tolist()
+            position_glb = transform_points([position], reconstruction_to_glb)[0].tolist()
             if normal is not None:
                 transformed = linear @ normal
                 wall_normal = (transformed / np.linalg.norm(transformed)).tolist()
@@ -202,7 +204,7 @@ def build_wall_scene(observations, mode, reconstruction=None, annotations=None, 
             hold["hold_type_source"], hold["hold_type_confidence"] = "human", None
         holds.append(hold)
     top_holds = [hold["id"] for hold in holds if hold["is_top"]]
-    return {"schema_version": "5.0", "units": units, "up_axis": up_axis,
+    return {"schema_version": SCENE_SCHEMA_VERSION, "units": units, "up_axis": up_axis,
             "source_file": None, "wall_object": None,
             "wall_bottom_height": wall_bottom_height, "wall_bottom_raw_min": None,
             "height_reference": height_reference,
@@ -242,7 +244,7 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
         orientation = (manual_up(cameras, reconstruction["depth_directory"],
                                  json.loads(Path(up_reference_path).read_text()))
                        if up_reference_path else estimate_up(cameras))
-    frame_paths = sorted((run / "inference").glob("*/holds.json"))
+    frame_paths = frame_record_paths(run)
     summary = json.loads((run / "inference/summary.json").read_text())
     if not frame_paths or summary["frame_count"] != len(frame_paths):
         raise ValueError("Inference frames are incomplete; resume segmentation before export")
@@ -264,8 +266,11 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
             hold = dict(hold)
             mask = None
             if hold.get("mask_path") and (pixels is not None or depth is not None):
-                with Image.open(frame_path.parent / hold["mask_path"]) as stored:
-                    mask = np.asarray(stored.convert("L")) > 0
+                try:
+                    with Image.open(frame_path.parent / hold["mask_path"]) as stored:
+                        mask = np.asarray(stored.convert("L")) > 0
+                except FileNotFoundError:
+                    hold["mask_path"] = None
             hold["mean_color"], hold["mean_color_source"] = _mean_color(pixels, mask, hold["bbox_xyxy"])
             if depth is not None and mask is not None:
                 if frame.get("rotation_clockwise_degrees", 0):
@@ -315,7 +320,7 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
             hold["mesh_correspondence"] = {
                 "method": "nearest_mesh_vertex", "mesh_path": reconstruction["mesh_path"],
                 "vertex_index": int(index), "position_3d": anchor.tolist(),
-                "position_glb": (transform[:3, :3] @ anchor + transform[:3, 3]).tolist() if glb_path else None,
+                "position_glb": transform_points([anchor], transform)[0].tolist() if glb_path else None,
                 "distance_reconstruction_units": float(distance),
                 "distance_m": float(distance * scale) if scale else None,
                 "is_semantic_hold_object_match": False, "needs_review": True,
@@ -329,5 +334,5 @@ def export_wall_scene(run, mode, reconstruction_path=None, annotations_path=None
     for observation in scene["observations"]:
         if observation["mask_path"]:
             observation["mask_path"] = "inference/" + observation["mask_path"]
-    (run / "scene.json").write_text(json.dumps(scene, indent=2, allow_nan=False) + "\n")
+    (run / SCENE_FILENAME).write_text(json.dumps(scene, indent=2, allow_nan=False) + "\n")
     return scene

@@ -5,6 +5,7 @@ from dataclasses import dataclass, field
 import numpy as np
 
 from ..capture.images import processed_image
+from .geometry import crop_box
 
 
 def rgb_to_lab(rgb: list[int]) -> list[float]:
@@ -58,9 +59,8 @@ def _cluster_route_candidates(observations: list[dict], threshold: float) -> lis
     return clusters
 
 
-def assign_color_groups(frames, color_distance_threshold=22.0):
-    """Enrich frame observations with colors and return reviewable group summaries."""
-    observations = []
+def measure_frame_colors(frames):
+    """Attach observed RGB and Lab colors to the entries in each frame."""
     for frame in frames:
         processed = None
         for hold in frame["holds"]:
@@ -68,13 +68,9 @@ def assign_color_groups(frames, color_distance_threshold=22.0):
             if rgb is None:
                 if processed is None:
                     processed = processed_image(frame)
-                x1, y1, x2, y2 = hold["bbox_xyxy"]
-                bounds = (
-                    max(0, int(np.floor(x1))), max(0, int(np.floor(y1))),
-                    min(processed.width, int(np.ceil(x2))),
-                    min(processed.height, int(np.ceil(y2))),
-                )
-                crop = np.asarray(processed.crop(bounds))
+                bounds = crop_box(hold["bbox_xyxy"], *processed.size, padding=0)
+                left, top, right, bottom = bounds
+                crop = np.asarray(processed.crop(bounds)) if right > left and bottom > top else np.empty(0)
                 rgb = (
                     np.median(crop.reshape(-1, 3), axis=0).round().astype(int).tolist()
                     if crop.size else None
@@ -85,9 +81,13 @@ def assign_color_groups(frames, color_distance_threshold=22.0):
                 if "bbox_color_fallback" not in hold["review_reasons"]:
                     hold["review_reasons"].append("bbox_color_fallback")
             hold["color_lab"] = rgb_to_lab(rgb) if rgb is not None else None
-            if hold["object_kind"] == "hold" and hold["color_lab"] is not None:
-                observations.append(hold)
 
+
+def assign_color_groups(frames, color_distance_threshold=22.0):
+    """Return color-based route candidates for legacy comparisons."""
+    measure_frame_colors(frames)
+    observations = [hold for frame in frames for hold in frame["holds"]
+                    if hold["object_kind"] == "hold" and hold["color_lab"] is not None]
     clusters = _cluster_route_candidates(observations, color_distance_threshold)
     route_candidates = []
     for index, cluster in enumerate(clusters, 1):

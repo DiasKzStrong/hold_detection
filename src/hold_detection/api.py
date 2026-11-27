@@ -20,6 +20,7 @@ from fastapi.responses import FileResponse, JSONResponse
 
 from .capture.images import IMAGE_EXTENSIONS
 from .capture.prepare import VIDEO_EXTENSIONS
+from .scene.artifacts import SCENE_SCHEMA_VERSION, read_scene, read_single_image_size
 
 
 logger = logging.getLogger(__name__)
@@ -54,16 +55,16 @@ def wall_file(result, scene):
     raise ValueError("Missing or invalid GLB artifact")
 
 
-def run_analysis(job, media, mode, options, slots):
+def run_analysis(job, media, mode, options, worker_env, slots):
     try:
         write_status(job, mode, "running")
         result = job / "result"
         command = [sys.executable, "-m", "hold_detection.cli", "analyze-wall", str(media),
                    "--mode", mode, "--output", str(result), *options]
         with (job / "worker.log").open("w") as log:
-            subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True)
-        scene = json.loads((result / "scene.json").read_text())
-        if scene.get("analysis_mode") != mode or scene.get("schema_version") != "5.0":
+            subprocess.run(command, stdout=log, stderr=subprocess.STDOUT, check=True, env=worker_env)
+        scene = read_scene(result)
+        if scene.get("analysis_mode") != mode or scene.get("schema_version") != SCENE_SCHEMA_VERSION:
             raise ValueError("Unexpected scene format")
 
         glb_url = None
@@ -72,10 +73,7 @@ def run_analysis(job, media, mode, options, slots):
             wall_file(result, scene)
             glb_url = f"{PREFIX}/{job.name}/wall.glb"
         else:
-            frames = list((result / "inference").glob("*/holds.json"))
-            if len(frames) != 1:
-                raise ValueError("Expected exactly one processed image in 2D mode")
-            width, height = json.loads(frames[0].read_text())["processed_size_wh"]
+            width, height = read_single_image_size(result)
             image = {"width": width, "height": height}
 
         exported = public_scene(scene)
@@ -100,8 +98,20 @@ def create_app():
     if not sam or not Path(sam).is_file():
         raise RuntimeError("Set DEMO_SAM_WEIGHTS to an existing SAM 3 checkpoint")
 
-    options = ["--sam-weights", str(Path(sam).resolve()),
-               "--device", os.environ.get("DEMO_GPU_DEVICE", "0"),
+    device = os.environ.get("DEMO_GPU_DEVICE", "0")
+    if not device.isascii() or not device.isdecimal():
+        raise RuntimeError("DEMO_GPU_DEVICE must be a nonnegative GPU index")
+    index = int(device)
+    worker_env = os.environ.copy()
+    if visible := worker_env.get("CUDA_VISIBLE_DEVICES"):
+        devices = visible.split(",")
+        if index >= len(devices) or devices[index].strip() in {"", "-1"}:
+            raise RuntimeError("DEMO_GPU_DEVICE is outside the visible CUDA devices")
+        device = devices[index].strip()
+    elif visible == "":
+        raise RuntimeError("CUDA_VISIBLE_DEVICES hides all GPUs")
+    worker_env["CUDA_VISIBLE_DEVICES"] = device
+    options = ["--sam-weights", str(Path(sam).resolve()), "--device", "0",
                "--colmap", os.environ.get("DEMO_COLMAP", "colmap")]
     if type_weights := os.environ.get("DEMO_TYPE_WEIGHTS"):
         if not Path(type_weights).is_file():
@@ -168,7 +178,7 @@ def create_app():
             with media.open("xb") as stream:
                 shutil.copyfileobj(file.file, stream)
             write_status(job, mode, "queued")
-            app.state.worker.submit(run_analysis, job, media, mode, options, slots)
+            app.state.worker.submit(run_analysis, job, media, mode, options, worker_env, slots)
         except Exception:
             slots.release()
             if job.is_dir():
@@ -196,7 +206,7 @@ def create_app():
         if status["mode"] != "3d" or status["status"] != "succeeded":
             raise HTTPException(404, "A completed 3D wall is required")
         result = job / "result"
-        scene = json.loads((result / "scene.json").read_text())
+        scene = read_scene(result)
         try:
             path = wall_file(result, scene)
         except ValueError as error:

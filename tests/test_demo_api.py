@@ -7,10 +7,6 @@ import time
 
 import pytest
 
-pytest.importorskip("fastapi")
-pytest.importorskip("python_multipart")
-pytest.importorskip("httpx")
-
 from fastapi.testclient import TestClient
 
 from hold_detection import api
@@ -24,6 +20,8 @@ def test_uploads_queue_and_return_mobile_artifacts(tmp_path, monkeypatch):
     monkeypatch.setenv("DEMO_API_ROOT", str(root))
     monkeypatch.setenv("DEMO_API_TOKEN", "demo-fixture")
     monkeypatch.setenv("DEMO_MAX_PENDING_JOBS", "2")
+    monkeypatch.setenv("CUDA_VISIBLE_DEVICES", "3,7")
+    monkeypatch.setenv("DEMO_GPU_DEVICE", "1")
     first_started = Event()
     release_first = Event()
 
@@ -32,6 +30,8 @@ def test_uploads_queue_and_return_mobile_artifacts(tmp_path, monkeypatch):
         result = Path(command[command.index("--output") + 1])
         result.mkdir()
         assert Path(command[4]).read_bytes() == b"fixture"
+        assert kwargs["env"]["CUDA_VISIBLE_DEVICES"] == "7"
+        assert command[command.index("--device") + 1] == "0"
         wall = {"glb_path": None}
         if mode == "2d":
             first_started.set()

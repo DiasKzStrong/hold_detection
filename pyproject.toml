@@ -21,7 +21,7 @@ dependencies = [
 
 [project.optional-dependencies]
 training = ["transformers==5.19.0", "huggingface-hub==2.2.0", "safetensors>=0.8,<1"]
-dev = ["pytest==8.4.2", "nbformat==5.10.4", "pycocotools==2.0.11", "ipywidgets==8.1.8", "pandas>=2.2,<4"]
+dev = ["pytest==8.4.2", "nbformat==5.10.4", "pycocotools==2.0.11", "ipywidgets==8.1.8", "pandas>=2.2,<4", "fastapi>=0.115,<1", "python-multipart>=0.0.22,<1", "httpx>=0.28,<1"]
 
 [project.scripts]
 holds = "hold_detection.cli:main"
